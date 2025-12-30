@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Garmin Artifacts
+resources-round-*
+fonts.md
+
+# OS
+.DS_Store
+Thumbs.db
