@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: main
+
+jobs:
+  # JOB 1: Code Quality (Linting & Formatting)
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Lint code
+        # Checks for syntax errors, unused imports, etc.
+        run: ruff check .
+
+      - name: Check formatting
+        # Fails if the code would be modified by the formatter
+        run: ruff format --check .
+
+  # JOB 2: Tests & Benchmarks
+  tests:
+    needs: quality  # Optional: Don't run tests if code quality fails
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-mock
+          pip install -e .
+
+      - name: Run Unit & Integration Tests
+        run: pytest tests/test_unit.py tests/test_integration.py -v
+
+      - name: Run Performance Benchmarks
+        run: pytest tests/test_performance.py -s

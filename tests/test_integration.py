@@ -1,5 +1,3 @@
-import os
-import json
 import pytest
 from unittest.mock import patch
 from garmin_font_scaler.core import FontProcessor
@@ -36,9 +34,9 @@ def test_pipeline_execution(workspace):
     project_dir = workspace
 
     # We pass the project directory to the processor
-    processor = FontProcessor() \
-        .with_project_dir(str(project_dir)) \
-        .with_font_tool_path("echo")
+    processor = (
+        FontProcessor().with_project_dir(str(project_dir)).with_font_tool_path("echo")
+    )
 
     with patch("subprocess.run") as mock_run:
         processor.parse_source_xml().execute()

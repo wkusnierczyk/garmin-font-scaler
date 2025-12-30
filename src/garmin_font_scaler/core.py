@@ -23,7 +23,9 @@ DEFAULT_HINTING = "none"
 
 TARGET_RESOURCES_DIR_PREFIX = "resources-round-"
 TARGET_RESOURCES_DIR_INFIX = "x"
-TARGET_RESOURCES_DIR_TEMPLATE = f"{TARGET_RESOURCES_DIR_PREFIX}{{diameter}}{TARGET_RESOURCES_DIR_INFIX}{{diameter}}"
+TARGET_RESOURCES_DIR_TEMPLATE = (
+    f"{TARGET_RESOURCES_DIR_PREFIX}{{diameter}}{TARGET_RESOURCES_DIR_INFIX}{{diameter}}"
+)
 
 XML_DEFAULT_CHARSET_NODE = "DefaultCharset"
 XML_FONT_CHARSETS_NODE = "FontCharsets"
@@ -55,12 +57,15 @@ DEFAULT_TABLE_FILENAME = "fonts.md"
 
 # --- Exceptions ---
 
+
 class FontScalerError(Exception):
     """Base exception for Font Scaler errors."""
+
     pass
 
 
 # --- Data Structures ---
+
 
 @dataclasses.dataclass
 class FontTask:
@@ -75,6 +80,7 @@ class FontTask:
 
 
 # --- Core Logic ---
+
 
 class FontProcessor:
     def __init__(self):
@@ -119,7 +125,9 @@ class FontProcessor:
         return self
 
     def _set_resources_paths(self):
-        self.resources_fonts_path = os.path.join(self.project_dir, self.resources_dir, self.fonts_subdir)
+        self.resources_fonts_path = os.path.join(
+            self.project_dir, self.resources_dir, self.fonts_subdir
+        )
         self.xml_file_path = os.path.join(self.resources_fonts_path, self.xml_file_name)
         return self
 
@@ -136,7 +144,9 @@ class FontProcessor:
     def with_target_diameters(self, target_diameters=None):
         if target_diameters:
             if isinstance(target_diameters, str):
-                self.target_diameters = [int(x.strip()) for x in target_diameters.split(",")]
+                self.target_diameters = [
+                    int(x.strip()) for x in target_diameters.split(",")
+                ]
             else:
                 self.target_diameters = target_diameters
         return self
@@ -156,16 +166,24 @@ class FontProcessor:
             # 1. Parse Screen Diameters
             diameters_node = self._find_json_node(root, XML_SCREEN_DIAMETERS_NODE)
             if diameters_node is None:
-                raise FontScalerError(f"<jsonData id='{XML_SCREEN_DIAMETERS_NODE}'> not found in XML.")
+                raise FontScalerError(
+                    f"<jsonData id='{XML_SCREEN_DIAMETERS_NODE}'> not found in XML."
+                )
 
             diameters_config = json.loads(diameters_node.text)
 
             if not self.target_diameters:
-                self.reference_diameter = diameters_config.get(JSON_REFERENCE_DIAMETER_KEY, self.reference_diameter)
-                self.target_diameters = diameters_config.get(JSON_TARGET_DIAMETERS_KEY, [])
+                self.reference_diameter = diameters_config.get(
+                    JSON_REFERENCE_DIAMETER_KEY, self.reference_diameter
+                )
+                self.target_diameters = diameters_config.get(
+                    JSON_TARGET_DIAMETERS_KEY, []
+                )
 
             if not self.reference_diameter or not self.target_diameters:
-                raise FontScalerError(f"Invalid {XML_SCREEN_DIAMETERS_NODE} JSON configuration.")
+                raise FontScalerError(
+                    f"Invalid {XML_SCREEN_DIAMETERS_NODE} JSON configuration."
+                )
 
             # 2. Determine Active Default Charset
             active_default_charset = DEFAULT_CHARSET
@@ -178,7 +196,9 @@ class FontProcessor:
             charsets_map = {}
             if charsets_node is not None:
                 charsets = json.loads(charsets_node.text)
-                charsets_map = {item[JSON_FONT_ID_KEY]: item[JSON_CHARSET_KEY] for item in charsets}
+                charsets_map = {
+                    item[JSON_FONT_ID_KEY]: item[JSON_CHARSET_KEY] for item in charsets
+                }
             else:
                 self._warn(f"<jsonData id='{XML_FONT_CHARSETS_NODE}'> not found.")
 
@@ -190,7 +210,9 @@ class FontProcessor:
 
                 match = re.search(FNT_FILENAME_PARSE_REGEX, fnt_filename)
                 if not match:
-                    self._warn(f"Skipping {fnt_filename} (Format '<font-name>-<fonts-size>.fnt' required)")
+                    self._warn(
+                        f"Skipping {fnt_filename} (Format '<font-name>-<fonts-size>.fnt' required)"
+                    )
                     continue
 
                 font_name = match.group(1)
@@ -207,7 +229,7 @@ class FontProcessor:
                     ttf_filename=ttf_filename,
                     reference_size=font_size,
                     target_size=None,
-                    charset=charset
+                    charset=charset,
                 )
                 self.font_tasks.append(task)
 
@@ -259,8 +281,10 @@ class FontProcessor:
 
         target_tree = ET.parse(target_xml)
         target_root = target_tree.getroot()
-        target_node_map = {node.get(XML_FONT_NODE_ID_ATTRIBUTE): node
-                           for node in target_root.findall(XML_FONT_NODE_PATTERN)}
+        target_node_map = {
+            node.get(XML_FONT_NODE_ID_ATTRIBUTE): node
+            for node in target_root.findall(XML_FONT_NODE_PATTERN)
+        }
 
         work_batches = defaultdict(list)
         for task in self.font_tasks:
@@ -275,15 +299,25 @@ class FontProcessor:
 
             font_tool_cmd = [
                 self.font_tool_path,
-                FONT_TOOL_SOURCE_TTF_OPTION, source_ttf_path,
-                FONT_TOOL_CHARSET_OPTION, charset,
-                FONT_TOOL_HINTING_OPTION, DEFAULT_HINTING,
-                FONT_TOOL_SIZE_OPTION, size_arg,
-                FONT_TOOL_OUTPUT_OPTION, target_dir
+                FONT_TOOL_SOURCE_TTF_OPTION,
+                source_ttf_path,
+                FONT_TOOL_CHARSET_OPTION,
+                charset,
+                FONT_TOOL_HINTING_OPTION,
+                DEFAULT_HINTING,
+                FONT_TOOL_SIZE_OPTION,
+                size_arg,
+                FONT_TOOL_OUTPUT_OPTION,
+                target_dir,
             ]
 
             try:
-                subprocess.run(font_tool_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(
+                    font_tool_cmd,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 for task in tasks:
                     new_filename = f"{task.font_name}-{task.target_size}.fnt"
                     if task.font_id in target_node_map:
@@ -291,15 +325,21 @@ class FontProcessor:
                         node.set(XML_FONT_NODE_FILENAME_ATTRIBUTE, new_filename)
 
             except subprocess.CalledProcessError as e:
-                raise FontScalerError(f"Failed processing TTF file '{ttf_filename}': {e}")
+                raise FontScalerError(
+                    f"Failed processing TTF file '{ttf_filename}': {e}"
+                )
             except FileNotFoundError:
-                raise FontScalerError(f"font processing tool '{self.font_tool_path}' not found.")
+                raise FontScalerError(
+                    f"font processing tool '{self.font_tool_path}' not found."
+                )
 
         self._pretty_print_xml(target_tree)
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
 
     def _generate_markdown_report(self):
-        all_diameters = sorted(list(set([self.reference_diameter] + self.target_diameters)))
+        all_diameters = sorted(
+            list(set([self.reference_diameter] + self.target_diameters))
+        )
 
         if self.table_filename == "-":
             # Write directly to stdout without closing it
@@ -312,7 +352,9 @@ class FontProcessor:
                 with open(full_table_path, "w", encoding="utf-8") as f:
                     self._write_report_content(f, all_diameters)
             except IOError as e:
-                raise FontScalerError(f"Failed to write table to {full_table_path}: {e}")
+                raise FontScalerError(
+                    f"Failed to write table to {full_table_path}: {e}"
+                )
 
     def _write_report_content(self, f, diameters):
         """Internal helper to write the report content to any open file-like object."""
@@ -342,19 +384,21 @@ class FontProcessor:
             for task in self.font_tasks:
                 el_text, font_text = self._humanize_names(task)
                 size = self._calculate_size(task.reference_size, d)
-                rows.append({
-                    "sort_dia": d,
-                    "sort_elem": el_text,
-                    "data": [f"{d} x {d}", el_text, font_text, str(size)]
-                })
+                rows.append(
+                    {
+                        "sort_dia": d,
+                        "sort_elem": el_text,
+                        "data": [f"{d} x {d}", el_text, font_text, str(size)],
+                    }
+                )
         rows.sort(key=lambda x: (x["sort_dia"], x["sort_elem"]))
         clean_rows = [r["data"] for r in rows]
         alignments = [False, True, True, False]
         self._write_formatted_table(f, headers, clean_rows, alignments)
 
     def _humanize_names(self, task) -> Tuple[str, str]:
-        el_text = re.sub(r'font$', '', task.font_id, flags=re.IGNORECASE)
-        el_text = re.sub(r'([a-z])([A-Z])', r'\1 \2', el_text)
+        el_text = re.sub(r"font$", "", task.font_id, flags=re.IGNORECASE)
+        el_text = re.sub(r"([a-z])([A-Z])", r"\1 \2", el_text)
         el_text = el_text.strip().capitalize()
 
         parts = task.font_name.split("-")
@@ -386,7 +430,11 @@ class FontProcessor:
         sep_parts = []
         for i in range(len(headers)):
             width = col_widths[i]
-            sep_parts.append((":" + "-" * (width - 1)) if is_left_align[i] else ("-" * (width - 1) + ":"))
+            sep_parts.append(
+                (":" + "-" * (width - 1))
+                if is_left_align[i]
+                else ("-" * (width - 1) + ":")
+            )
         f.write("| " + " | ".join(sep_parts) + " |\n")
         for row in rows:
             write_row(row)
@@ -415,7 +463,9 @@ class FontProcessor:
             ET.indent(tree, space="    ", level=0)
 
     def _calculate_size(self, original_size, target_diameter):
-        return int(round(float(original_size) / self.reference_diameter * target_diameter))
+        return int(
+            round(float(original_size) / self.reference_diameter * target_diameter)
+        )
 
     def _info(self, message):
         print(message, file=sys.stderr)

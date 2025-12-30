@@ -1,6 +1,4 @@
-import pytest
 import time
-import os
 from unittest.mock import patch
 from garmin_font_scaler.core import FontProcessor, FontTask
 
@@ -14,7 +12,7 @@ def create_dummy_task(font_name, size):
         ttf_filename=f"{font_name}.ttf",
         reference_size=size,
         target_size=None,
-        charset="012345"
+        charset="012345",
     )
 
 
@@ -38,17 +36,18 @@ def test_batch_processing_benchmark(tmp_path):
 
     # Generate 100 tasks (sizes 10 to 110)
     num_tasks = 100
-    processor.font_tasks = [create_dummy_task(font_name, s) for s in range(10, 10 + num_tasks)]
+    processor.font_tasks = [
+        create_dummy_task(font_name, s) for s in range(10, 10 + num_tasks)
+    ]
     processor.target_diameters = [280, 454]  # 2 targets = 200 total outputs
     processor.reference_diameter = 280
 
     # 2. Execution & Timing
     start_time = time.perf_counter()
 
-    with patch("subprocess.run") as mock_run, \
-            patch("xml.etree.ElementTree.parse"), \
-            patch("xml.etree.ElementTree.ElementTree.write"):
-
+    with patch("subprocess.run") as mock_run, patch(
+        "xml.etree.ElementTree.parse"
+    ), patch("xml.etree.ElementTree.ElementTree.write"):
         processor.execute()
 
         # Verify optimization logic
@@ -62,11 +61,17 @@ def test_batch_processing_benchmark(tmp_path):
 
     # Define raw data
     report_data = [
-        ("Tasks Processed:", f"{num_tasks} fonts x {len(processor.target_diameters)} targets"),
+        (
+            "Tasks Processed:",
+            f"{num_tasks} fonts x {len(processor.target_diameters)} targets",
+        ),
         ("Total Operations:", f"{total_ops}"),
-        ("Optimized Batch Calls:", f"{mock_run.call_count} (vs {total_ops} unoptimized)"),
+        (
+            "Optimized Batch Calls:",
+            f"{mock_run.call_count} (vs {total_ops} unoptimized)",
+        ),
         ("Execution Time:", f"{duration:.4f} seconds"),
-        ("Speed:", f"{num_tasks / duration:.0f} tasks/sec (simulated)")
+        ("Speed:", f"{num_tasks / duration:.0f} tasks/sec (simulated)"),
     ]
 
     # Calculate widths for alignment
@@ -81,7 +86,7 @@ def test_batch_processing_benchmark(tmp_path):
         formatted_lines.append(line)
 
     # Calculate total width for the separator line
-    max_line_length = max(len(l) for l in formatted_lines)
+    max_line_length = max(len(line) for line in formatted_lines)
     title = "PERFORMANCE BENCHMARK REPORT"
     # Ensure separator is at least as long as title or lines
     separator_len = max(max_line_length, len(title))

@@ -10,10 +10,12 @@ def test_calculate_size():
 
 
 def test_resource_path_construction():
-    fp = FontProcessor() \
-        .with_resources_dir("my_res") \
-        .with_fonts_subdir("my_fonts") \
+    fp = (
+        FontProcessor()
+        .with_resources_dir("my_res")
+        .with_fonts_subdir("my_fonts")
         .with_xml_file_name("config.xml")
+    )
 
     # Paths are relative to CWD by default
     expected = os.path.join(".", "my_res", "my_fonts", "config.xml")
