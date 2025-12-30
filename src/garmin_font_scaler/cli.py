@@ -1,15 +1,6 @@
 import argparse
 import sys
-
-from .core import (FontProcessor,
-                   FontScalerError,
-                   DEFAULT_PROJECT_DIR,
-                   DEFAULT_RESOURCES_DIR,
-                   DEFAULT_FONTS_SUBDIR,
-                   DEFAULT_XML_FILENAME,
-                   DEFAULT_REFERENCE_DIAMETER,
-                   DEFAULT_TOOL_PATH,
-                   DEFAULT_TABLE_FILENAME)
+from .core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
 
 
 def main():
@@ -18,32 +9,40 @@ def main():
         usage="%(prog)s [options]",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+
     parser.add_argument("--project-dir",
                         default=DEFAULT_PROJECT_DIR,
-                        help="Base directory of the Garmin project containing the 'resources' directory")
+                        help="Base directory of the Garmin project (containing 'resources' folder)")
+
     parser.add_argument("--resources-dir",
-                        default=DEFAULT_RESOURCES_DIR,
+                        default="resources",
                         help="Relative path to resources directory")
+
     parser.add_argument("--fonts-subdir",
-                        default=DEFAULT_FONTS_SUBDIR,
+                        default="fonts",
                         help="Relative path to fonts subdirectory")
+
     parser.add_argument("--xml-file",
-                        default=DEFAULT_XML_FILENAME,
+                        default="fonts.xml",
                         help="Filename of the fonts XML")
+
     parser.add_argument("--reference-diameter",
                         type=int,
-                        default=DEFAULT_REFERENCE_DIAMETER,
+                        default=280,
                         help="Reference screen diameter")
+
     parser.add_argument("--target-diameters",
-                        help="Comma-separated list of target diameters")
+                        help="Comma-separated list of target diameters (overrides XML config)")
+
     parser.add_argument("--tool-path",
-                        default=DEFAULT_TOOL_PATH,
+                        default="ttf2bmp",
                         help="Path to ttf2bmp executable")
+
     parser.add_argument("--table",
                         nargs='?',
-                        const=DEFAULT_TABLE_FILENAME,
-                        default=DEFAULT_TABLE_FILENAME,
-                        help=f"Generate markdown table of sizes")
+                        const="-",  # Special value indicating STDOUT
+                        default=None,
+                        help="Generate markdown table of sizes (writes to stdout if no file is specified)")
 
     args = parser.parse_args()
 

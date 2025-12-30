@@ -10,6 +10,7 @@ from collections import defaultdict
 from typing import Optional, Tuple
 
 # --- Configuration Constants ---
+
 DEFAULT_PROJECT_DIR = "."
 DEFAULT_RESOURCES_DIR = "resources"
 DEFAULT_FONTS_SUBDIR = "fonts"
@@ -248,8 +249,8 @@ class FontProcessor:
                 missing.append(ttf_filename)
 
         if missing:
-            missing_ttfs = ", ".join(missing)
-            msg = f"Missing {len(missing)} source TTF files: {missing_ttfs}"
+            file_list = ", ".join(missing)
+            msg = f"Missing {len(missing)} Source TTF File(s): {file_list}"
             raise FontScalerError(msg)
 
     def _process_diameter(self, target_diameter):
@@ -290,8 +291,6 @@ class FontProcessor:
                         node.set(XML_FONT_NODE_FILENAME_ATTRIBUTE, new_filename)
 
             except subprocess.CalledProcessError as e:
-                # We log this but do not crash the whole batch, or we could raise.
-                # Since one failure ruins the build, raising is safer.
                 raise FontScalerError(f"Failed processing TTF file '{ttf_filename}': {e}")
             except FileNotFoundError:
                 raise FontScalerError(f"font processing tool '{self.font_tool_path}' not found.")
@@ -300,21 +299,28 @@ class FontProcessor:
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
 
     def _generate_markdown_report(self):
-        full_table_path = os.path.join(self.project_dir, self.table_filename)
-        self._info(f"Generating markdown report: {full_table_path}")
-
         all_diameters = sorted(list(set([self.reference_diameter] + self.target_diameters)))
 
-        try:
-            with open(full_table_path, "w", encoding="utf-8") as f:
-                f.write("# Font sizes by element\n\n")
-                self._write_matrix_table(f, all_diameters)
-                f.write("\n")
-                f.write("# Font sizes by resolution\n\n")
-                self._write_resolution_list_table(f, all_diameters)
+        if self.table_filename == "-":
+            # Write directly to stdout without closing it
+            self._write_report_content(sys.stdout, all_diameters)
+        else:
+            # Write to a file
+            full_table_path = os.path.join(self.project_dir, self.table_filename)
+            self._info(f"Generating markdown report: {full_table_path}")
+            try:
+                with open(full_table_path, "w", encoding="utf-8") as f:
+                    self._write_report_content(f, all_diameters)
+            except IOError as e:
+                raise FontScalerError(f"Failed to write table to {full_table_path}: {e}")
 
-        except IOError as e:
-            raise FontScalerError(f"Failed to write table to {full_table_path}: {e}")
+    def _write_report_content(self, f, diameters):
+        """Internal helper to write the report content to any open file-like object."""
+        f.write("# Font sizes by element\n\n")
+        self._write_matrix_table(f, diameters)
+        f.write("\n")
+        f.write("# Font sizes by resolution\n\n")
+        self._write_resolution_list_table(f, diameters)
 
     def _write_matrix_table(self, f, diameters):
         headers = ["Element", "Font"] + [str(d) for d in diameters]
