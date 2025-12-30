@@ -1,5 +1,7 @@
 # Garmin Font Scaler
 
+[![CI](https://github.com/wkusnierczyk/garmin-font-scaler/actions/workflows/tests.yml/badge.svg)](https://github.com/wkusnierczyk/garmin-font-scaler/actions/workflows/tests.yml)
+
 **Garmin Font Scaler** is a robust Python utility designed to automate the generation and scaling of bitmap fonts for Garmin Connect IQ watch faces. 
 It streamlines the process of adapting a watch face design to the wide variety of screen sizes in the Garmin ecosystem (e.g., 218px, 260px, 280px, 454px).
 
