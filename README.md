@@ -17,7 +17,17 @@ Instead of manually calculating font sizes, running conversion tools one by one,
 > Maually, this process was very tedious.
 > The script provided an immense help, and is therefore shared as a contribution to the Garmin Developer community. 
 
-## Key Features
+## Contents
+
+* [Features](#features)
+* [Prerequisites](#prerequisites)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Build, Test, and Release](#build-test-and-release)
+* [About](#about)
+* [License](#license)
+
+## Features
 
 * **Zero-Config scaling**  
 The `garmin-font-scaler` reads all information needed to perform the scaling (reference font size, target diameters, charsets) directly from JSON blocks embedded in the original `fonts.xml` file.
@@ -63,7 +73,7 @@ You can also use the included `Makefile` to install the package with `make`:
 make install
 ```
 
-## Configuration
+## Usage
 
 The tool relies on a standard Garmin `fonts.xml` file augmented with custom JSON data blocks. 
 This allows your source file to remain the single source of truth while still complying with the format constraints of Garmin Connect IQ SDK project files.
@@ -284,6 +294,18 @@ make clean
 ```
 
 Consult the included [`Makefile`](Makefile) for further details.
+
+## About
+
+```bash
+garmin-font-scaler --about
+```
+```bash
+garmin-font-scaler: bitmap font scaling automation for Garmin screen dimensions
+├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
+├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler
+└─ licence:    MIT https://opensource.org/licenses/MIT
+```
 
 ## License
 
