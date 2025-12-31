@@ -1,6 +1,23 @@
 import argparse
 import sys
-from .core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
+from garmin_font_scaler.core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
+
+
+class AboutAction(argparse.Action):
+    """Custom action to print about info to stderr and exit."""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        info = (
+            "garmin-font-scaler: bitmap font scaling automation for different Garmin watch screen dimensions\n"
+            "├─ developer:  mailto:waclaw.kusnierczyk@gmail.com\n"
+            "├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler\n"
+            "└─ licence:    MIT https://opensource.org/licenses/MIT"
+        )
+        print(info, file=sys.stderr)
+        sys.exit(0)
 
 
 def main():
@@ -8,6 +25,11 @@ def main():
         description="Garmin Font Scaler",
         usage="%(prog)s [options]",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # The custom action triggers immediately when encountered
+    parser.add_argument(
+        "--about", action=AboutAction, help="Show about information and exit"
     )
 
     parser.add_argument(
