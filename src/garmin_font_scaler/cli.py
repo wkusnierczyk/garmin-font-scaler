@@ -46,9 +46,7 @@ def main():
     )
 
     parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {get_version()}"
+        "--version", action="version", version=f"%(prog)s {get_version()}"
     )
 
     parser.add_argument(
