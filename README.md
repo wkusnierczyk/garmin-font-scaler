@@ -165,6 +165,7 @@ garmin-font-scaler --help
 options:
   -h, --help            show this help message and exit
   --about               Show about information and exit
+  --version             show program's version number and exit
   --project-dir PROJECT_DIR
                         Base directory of the Garmin project (default: .)
   --xml-file XML_FILE   Filename of the fonts XML (default: fonts.xml)
@@ -200,6 +201,7 @@ make clean
 garmin-font-scaler --about
 
 garmin-font-scaler: bitmap font scaling automation for Garmin screen resolutions
+├─ version:    0.2.2
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler
 └─ licence:    MIT https://opensource.org/licenses/MIT
