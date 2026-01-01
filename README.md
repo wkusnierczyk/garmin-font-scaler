@@ -30,7 +30,7 @@ Instead of manually calculating font sizes, running conversion tools one by one,
 
 ## Features
 
-* **Zero-Config scaling** The `garmin-font-scaler` reads all information needed to perform the scaling (reference resolution, target resolutions, charsets) directly from JSON blocks embedded in the original `fonts.xml` file.
+* **Zero-Config scaling** The `garmin-font-scaler` reads all information needed to perform the scaling (reference resolution, target resolutions, charsets) directly from JSON data files linked in the original `fonts.xml`.
 * **Shape Aware** Supports round, semi-round, and rectangular screens.
 * **Smart Scaling Heuristic** Uses a robust heuristic for scaling fonts between different aspect ratios (scaling based on the constraining dimension), ensuring text remains readable on 148x205 rectangles just as well as 454x454 round screens.
 * **Batch Optimization** The `garmin-font-scaler` groups font generation tasks by source TTF file to minimize calls to the underlying conversion tool, speeding up the build process.
@@ -71,7 +71,7 @@ This ensures that a line of text that fits perfectly across the width of the rou
 
 ## Installation
 
-You can `garmin-font-scaler` the package directly from source:
+You can install the package directly from source:
 
 ```bash
 git clone [https://github.com/wkusnierczyk/garmin-font-scaler.git](https://github.com/wkusnierczyk/garmin-font-scaler.git)
@@ -94,39 +94,52 @@ make install
 
 ## Usage
 
-The tool relies on a standard Garmin `fonts.xml` file augmented with custom JSON data blocks. 
+The tool relies on a standard Garmin `fonts.xml` file augmented with custom `jsonData` tags that point to external JSON configuration files.
 
-### 1. Augment `fonts.xml`
+### 1. Create `resolutions.json`
 
-Your `fonts.xml` file will map font IDs to filenames. You must add two `jsonData` blocks: `FontCharsets` and `ScreenResolutions`.
+Define your reference device (the one you designed for) and the target devices you want to support.
+
+```json
+{
+    "reference": { "resolution": [260, 260], "shape": "round" },
+    "targets": [
+        { "resolution": [218, 218], "shape": "round" },
+        { "resolution": [454, 454], "shape": "round" },
+        { "resolution": [148, 205], "shape": "rectangle" },
+        { "resolution": [215, 180], "shape": "semi-round" }
+    ]
+}
+```
+
+### 2. Create `charsets.json`
+
+Map your Font IDs (from `fonts.xml`) to the specific characters they need to support.
+
+```json
+[
+  { "fontId": "HourFont", "fontCharset": "0123456789" },
+  { "fontId": "DataFont", "fontCharset": "0123456789%°C" }
+]
+```
+
+### 3. Update `fonts.xml`
+
+In your `fonts.xml`, add `jsonData` tags pointing to the files you just created.
 
 ```xml
 <resources>
     <fonts>
         <font id="HourFont" filename="SUSEMono-Bold-30.fnt" antialias="true" />
-        ...
+        <font id="DataFont" filename="Roboto-Regular-18.fnt" antialias="true" />
     </fonts>
     
-    <jsonData id="FontCharsets">[
-        { "fontId": "HourFont", "fontCharset": "0123456789" }
-    ]</jsonData>
-    
-    <jsonData id="ScreenResolutions">{
-        "reference": { 
-            "resolution": [280, 280], 
-            "shape": "round" 
-        },
-        "targets": [
-            { "resolution": [454, 454], "shape": "round" },
-            { "resolution": [215, 180], "shape": "semi-round" },
-            { "resolution": [148, 205], "shape": "rectangle" }
-        ]
-    }</jsonData>
-
+    <jsonData id="ScreenResolutions" filename="resolutions.json" />
+    <jsonData id="FontCharsets" filename="charsets.json" />
 </resources>    
 ```
 
-### 2. Execute
+### 4. Execute
 
 Run the tool from your project root:
 
@@ -136,7 +149,7 @@ garmin-font-scaler
 
 This will create directories like `resources-round-454x454/fonts` and `resources-rectangle-148x205/fonts`, generating all required assets.
 
-### 3. Generate Report
+### 5. Generate Report
 
 To see a table of all the generated scaled fonts:
 

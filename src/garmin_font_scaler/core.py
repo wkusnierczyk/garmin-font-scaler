@@ -159,6 +159,38 @@ class FontProcessor:
         self.table_filename = table_filename
         return self
 
+    def _load_json_data(self, node: ET.Element):
+        """
+        Helper to load JSON data from a jsonData node.
+        Prioritizes the 'filename' attribute (external file) over inline text content.
+        """
+        if node is None:
+            return None
+
+        # Strategy 1: External File via 'filename' attribute
+        filename = node.get("filename")
+        if filename:
+            # Resolve path relative to the XML file location
+            base_dir = os.path.dirname(os.path.abspath(self.xml_file_path))
+            json_path = os.path.join(base_dir, filename)
+
+            if not os.path.exists(json_path):
+                raise FontScalerError(f"External JSON file not found: {json_path}")
+
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError as e:
+                raise FontScalerError(
+                    f"Error parsing external JSON file '{json_path}': {e}"
+                )
+
+        # Strategy 2: Inline Content
+        if node.text and node.text.strip():
+            return json.loads(node.text)
+
+        return None
+
     def parse_source_xml(self):
         if not os.path.exists(self.xml_file_path):
             raise FontScalerError(f"Font xml file '{self.xml_file_path}' not found.")
@@ -174,7 +206,11 @@ class FontProcessor:
                     f"<jsonData id='{XML_SCREEN_RESOLUTIONS_NODE}'> not found in XML."
                 )
 
-            res_config = json.loads(resolutions_node.text)
+            res_config = self._load_json_data(resolutions_node)
+            if not res_config:
+                raise FontScalerError(
+                    f"Content for {XML_SCREEN_RESOLUTIONS_NODE} is empty or invalid."
+                )
 
             # Parse Reference
             ref_data = res_config.get(JSON_REFERENCE_KEY)
@@ -209,16 +245,20 @@ class FontProcessor:
             active_default_charset = DEFAULT_CHARSET
             def_charset_node = self._find_json_node(root, XML_DEFAULT_CHARSET_NODE)
             if def_charset_node is not None:
-                active_default_charset = str(json.loads(def_charset_node.text))
+                data = self._load_json_data(def_charset_node)
+                if data is not None:
+                    active_default_charset = str(data)
 
             # 3. Parse Specific Charset Maps
             charsets_node = self._find_json_node(root, XML_FONT_CHARSETS_NODE)
             charsets_map = {}
             if charsets_node is not None:
-                charsets = json.loads(charsets_node.text)
-                charsets_map = {
-                    item[JSON_FONT_ID_KEY]: item[JSON_CHARSET_KEY] for item in charsets
-                }
+                charsets = self._load_json_data(charsets_node)
+                if charsets:
+                    charsets_map = {
+                        item[JSON_FONT_ID_KEY]: item[JSON_CHARSET_KEY]
+                        for item in charsets
+                    }
             else:
                 self._warn(f"<jsonData id='{XML_FONT_CHARSETS_NODE}'> not found.")
 
