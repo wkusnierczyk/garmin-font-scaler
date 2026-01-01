@@ -3,6 +3,19 @@ import sys
 from .core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
 
 
+try:
+    from importlib.metadata import version, PackageNotFoundError
+except ImportError:
+    pass
+
+
+def get_version():
+    try:
+        return version("garmin-font-scaler")
+    except PackageNotFoundError:
+        return "0.0.0-dev"
+
+
 class AboutAction(argparse.Action):
     """Custom action to print about info to stderr and exit."""
 
@@ -12,6 +25,7 @@ class AboutAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         info = (
             "garmin-font-scaler: bitmap font scaling automation for Garmin screen resolutions\n"
+            f"├─ version:    {get_version()}\n"
             "├─ developer:  mailto:waclaw.kusnierczyk@gmail.com\n"
             "├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler\n"
             "└─ licence:    MIT https://opensource.org/licenses/MIT"
@@ -29,6 +43,12 @@ def main():
 
     parser.add_argument(
         "--about", action=AboutAction, help="Show about information and exit"
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {get_version()}"
     )
 
     parser.add_argument(
