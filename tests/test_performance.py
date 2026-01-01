@@ -41,13 +41,13 @@ def test_batch_processing_benchmark(tmp_path):
     processor.reference_config = ScreenConfig(280, 280, "round")
     processor.target_configs = [
         ScreenConfig(280, 280, "round"),
-        ScreenConfig(454, 454, "round")
+        ScreenConfig(454, 454, "round"),
     ]
 
     start_time = time.perf_counter()
 
     with patch("subprocess.run") as mock_run, patch(
-            "xml.etree.ElementTree.parse"
+        "xml.etree.ElementTree.parse"
     ), patch("xml.etree.ElementTree.ElementTree.write"):
         processor.execute()
 
