@@ -96,7 +96,7 @@ make install
 
 The tool relies on a standard Garmin `fonts.xml` file augmented with custom `jsonData` tags that point to external JSON configuration files.
 
-### 1. Create `resolutions.json`
+#### Create `resolutions.json`
 
 Define your reference device (the one you designed for) and the target devices you want to support.
 
@@ -112,7 +112,7 @@ Define your reference device (the one you designed for) and the target devices y
 }
 ```
 
-### 2. Create `charsets.json`
+#### Create `charsets.json`
 
 Map your Font IDs (from `fonts.xml`) to the specific characters they need to support.
 
@@ -123,7 +123,7 @@ Map your Font IDs (from `fonts.xml`) to the specific characters they need to sup
 ]
 ```
 
-### 3. Update `fonts.xml`
+#### Update `fonts.xml`
 
 In your `fonts.xml`, add `jsonData` tags pointing to the files you just created.
 
@@ -139,7 +139,7 @@ In your `fonts.xml`, add `jsonData` tags pointing to the files you just created.
 </resources>    
 ```
 
-### 4. Execute
+#### Execute
 
 Run the tool from your project root:
 
@@ -149,7 +149,7 @@ garmin-font-scaler
 
 This will create directories like `resources-round-454x454/fonts` and `resources-rectangle-148x205/fonts`, generating all required assets.
 
-### 5. Generate Report
+#### Generate Report
 
 To see a table of all the generated scaled fonts:
 
