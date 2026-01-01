@@ -427,7 +427,7 @@ class FontProcessor:
 
     def _write_matrix_table(self, f, configs):
         headers = ["Element", "Font"] + [
-            f"{c.width}x{c.height}\n({c.shape})" for c in configs
+            f"{c.shape}-{c.width}x{c.height}" for c in configs
         ]
         rows = []
         for task in self.font_tasks:
