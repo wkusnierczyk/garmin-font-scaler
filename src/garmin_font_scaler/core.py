@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 from collections import defaultdict
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List
 
 # --- Configuration Constants ---
 

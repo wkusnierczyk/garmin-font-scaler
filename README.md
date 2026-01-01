@@ -20,6 +20,7 @@ Instead of manually calculating font sizes, running conversion tools one by one,
 ## Contents
 
 * [Features](#features)
+* [Scaling Logic](#scaling-logic)
 * [Prerequisites](#prerequisites)
 * [Installation](#installation)
 * [Usage](#usage)
@@ -37,6 +38,32 @@ Instead of manually calculating font sizes, running conversion tools one by one,
 The output is provided as a neatly formatted Markdown table, suitable for inclusion in a documentation file for your watch face.  
 * **Clean Artifacts** The `garmin-font-scaler` automatically generates the correct directory structure (e.g., `resources-rectangle-148x205/fonts`) and creates compliant `fonts.xml` files (stripped of the non-standard JSON configuration included in the original `fonts.xml` file).
 
+## Scaling Logic
+
+The scaler determines the new font size by calculating a scaling factor ($k$) that respects the constraints of the target screen shape relative to the reference screen.
+
+### The Calculation
+
+To ensure text content fits safely on the target device without clipping, the tool calculates the scaling ratio for both dimensions and applies the **constraining (smaller) dimension**:
+
+$$
+k = \min \left( \frac{W_{target}}{W_{ref}}, \frac{H_{target}}{H_{ref}} \right)
+$$
+
+Where:
+* $W_{target}, H_{target}$ are the dimensions of the device you are generating fonts for.
+* $W_{ref}, H_{ref}$ are the dimensions of the device you originally designed for.
+
+### Example Scenario
+
+If your reference device is a **280x280 (Round)** watch, and you are scaling to a **148x205 (Rectangle)** device:
+
+1.  **Width Ratio:** $148 / 280 \approx 0.53$
+2.  **Height Ratio:** $205 / 280 \approx 0.73$
+3.  **Result:** The tool selects **0.53** as the scaling factor.
+
+This ensures that a line of text that fits perfectly across the width of the round watch will be scaled down enough to fit across the width of the narrow rectangular watch.
+
 ## Prerequisites
 
 * Python 3.7+
@@ -47,7 +74,7 @@ The output is provided as a neatly formatted Markdown table, suitable for inclus
 You can `garmin-font-scaler` the package directly from source:
 
 ```bash
-git clone https://github.com/wkusnierczyk/garmin-font-scaler.git
+git clone [https://github.com/wkusnierczyk/garmin-font-scaler.git](https://github.com/wkusnierczyk/garmin-font-scaler.git)
 cd garmin-font-scaler
 
 pip install .
