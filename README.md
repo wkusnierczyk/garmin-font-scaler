@@ -191,6 +191,9 @@ make test
 # Run benchmarks
 make perf
 
+# Clean up code
+make format lint
+
 # Clean artifacts
 make clean
 ```
