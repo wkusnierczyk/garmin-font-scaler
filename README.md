@@ -16,6 +16,8 @@ Instead of manually calculating font sizes, running conversion tools one by one,
 > Appropriate font sizes need to be calculated anew for each screen resolution, and new bitmap (`fnt` and `png`) font files need to be generated from the source True Type (`ttf`) font files.
 > Maually, this process was very tedious.
 > The script provided an immense help, and is therefore shared as a contribution to the Garmin Developer community. 
+> 
+> See the [`garmin-watch-faces`](https://github.com/wkusnierczyk/garmin-watch-faces) project for more information.
 
 ## Contents
 
