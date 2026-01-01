@@ -397,8 +397,13 @@ class FontProcessor:
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
 
     def _generate_markdown_report(self):
-        # We include reference in the list for the report
-        all_configs = [self.reference_config] + self.target_configs
+        seen_keys = {self.reference_config.key}
+        all_configs = [self.reference_config]
+
+        for config in self.target_configs:
+            if config.key not in seen_keys:
+                all_configs.append(config)
+                seen_keys.add(config.key)
 
         if self.table_filename == "-":
             self._write_report_content(sys.stdout, all_configs)
@@ -429,7 +434,7 @@ class FontProcessor:
             el_text, font_text = self._humanize_names(task)
             row_data = [el_text, font_text]
             for c in configs:
-                if c == self.reference_config:
+                if c.key == self.reference_config.key:
                     row_data.append(str(task.reference_size))
                 else:
                     size = self._calculate_size(task.reference_size, c)
@@ -444,7 +449,7 @@ class FontProcessor:
         for c in configs:
             for task in self.font_tasks:
                 el_text, font_text = self._humanize_names(task)
-                if c == self.reference_config:
+                if c.key == self.reference_config.key:
                     size = task.reference_size
                 else:
                     size = self._calculate_size(task.reference_size, c)
