@@ -74,7 +74,7 @@ This ensures that a line of text that fits perfectly across the width of the rou
 You can install the package directly from source:
 
 ```bash
-git clone [https://github.com/wkusnierczyk/garmin-font-scaler.git](https://github.com/wkusnierczyk/garmin-font-scaler.git)
+git clone https://github.com/wkusnierczyk/garmin-font-scaler.git
 cd garmin-font-scaler
 
 pip install .
