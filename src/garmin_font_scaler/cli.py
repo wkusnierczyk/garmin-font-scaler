@@ -1,6 +1,6 @@
 import argparse
 import sys
-from garmin_font_scaler.core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
+from .core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
 
 
 class AboutAction(argparse.Action):
@@ -27,7 +27,6 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # The custom action triggers immediately when encountered
     parser.add_argument(
         "--about", action=AboutAction, help="Show about information and exit"
     )
@@ -53,15 +52,6 @@ def main():
     )
 
     parser.add_argument(
-        "--reference-diameter", type=int, default=280, help="Reference screen diameter"
-    )
-
-    parser.add_argument(
-        "--target-diameters",
-        help="Comma-separated list of target diameters (overrides XML config)",
-    )
-
-    parser.add_argument(
         "--tool-path", default="ttf2bmp", help="Path to ttf2bmp executable"
     )
 
@@ -82,8 +72,6 @@ def main():
             .with_resources_dir(args.resources_dir)
             .with_fonts_subdir(args.fonts_subdir)
             .with_xml_file_name(args.xml_file)
-            .with_reference_diameter(args.reference_diameter)
-            .with_target_diameters(args.target_diameters)
             .with_font_tool_path(args.tool_path)
             .with_table_filename(args.table)
             .parse_source_xml()

@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 from collections import defaultdict
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 # --- Configuration Constants ---
 
@@ -17,21 +17,24 @@ DEFAULT_FONTS_SUBDIR = "fonts"
 DEFAULT_XML_FILENAME = "fonts.xml"
 DEFAULT_TOOL_PATH = "ttf2bmp"
 
-DEFAULT_REFERENCE_DIAMETER = 280
+# Default fallback if XML is missing config
+DEFAULT_REFERENCE_CONFIG = {"resolution": [280, 280], "shape": "round"}
+
 DEFAULT_CHARSET = "0123456789:"
 DEFAULT_HINTING = "none"
 
-TARGET_RESOURCES_DIR_PREFIX = "resources-round-"
-TARGET_RESOURCES_DIR_INFIX = "x"
-TARGET_RESOURCES_DIR_TEMPLATE = (
-    f"{TARGET_RESOURCES_DIR_PREFIX}{{diameter}}{TARGET_RESOURCES_DIR_INFIX}{{diameter}}"
-)
+# New Directory Template: resources-{shape}-{width}x{height}
+TARGET_RESOURCES_DIR_TEMPLATE = "resources-{shape}-{width}x{height}"
 
 XML_DEFAULT_CHARSET_NODE = "DefaultCharset"
 XML_FONT_CHARSETS_NODE = "FontCharsets"
-XML_SCREEN_DIAMETERS_NODE = "ScreenDiameters"
-JSON_REFERENCE_DIAMETER_KEY = "referenceDiameter"
-JSON_TARGET_DIAMETERS_KEY = "targetDiameters"
+# Updated JSON Node ID
+XML_SCREEN_RESOLUTIONS_NODE = "ScreenResolutions"
+
+JSON_REFERENCE_KEY = "reference"
+JSON_TARGETS_KEY = "targets"
+JSON_RESOLUTION_KEY = "resolution"
+JSON_SHAPE_KEY = "shape"
 JSON_FONT_ID_KEY = "fontId"
 JSON_CHARSET_KEY = "fontCharset"
 
@@ -79,6 +82,17 @@ class FontTask:
     charset: str
 
 
+@dataclasses.dataclass
+class ScreenConfig:
+    width: int
+    height: int
+    shape: str
+
+    @property
+    def key(self):
+        return f"{self.shape}-{self.width}x{self.height}"
+
+
 # --- Core Logic ---
 
 
@@ -94,8 +108,13 @@ class FontProcessor:
         self.xml_file_path = ""
         self._set_resources_paths()
 
-        self.reference_diameter = DEFAULT_REFERENCE_DIAMETER
-        self.target_diameters = []
+        # Defaults
+        self.reference_config = ScreenConfig(
+            width=DEFAULT_REFERENCE_CONFIG["resolution"][0],
+            height=DEFAULT_REFERENCE_CONFIG["resolution"][1],
+            shape=DEFAULT_REFERENCE_CONFIG["shape"],
+        )
+        self.target_configs: List[ScreenConfig] = []
         self.font_tasks = []
 
         self.table_filename = None
@@ -136,24 +155,41 @@ class FontProcessor:
             self.font_tool_path = font_tool_path
         return self
 
-    def with_reference_diameter(self, reference_diameter=None):
-        if reference_diameter:
-            self.reference_diameter = reference_diameter
-        return self
-
-    def with_target_diameters(self, target_diameters=None):
-        if target_diameters:
-            if isinstance(target_diameters, str):
-                self.target_diameters = [
-                    int(x.strip()) for x in target_diameters.split(",")
-                ]
-            else:
-                self.target_diameters = target_diameters
-        return self
-
     def with_table_filename(self, table_filename=None):
         self.table_filename = table_filename
         return self
+
+    def _load_json_data(self, node: ET.Element):
+        """
+        Helper to load JSON data from a jsonData node.
+        Prioritizes the 'filename' attribute (external file) over inline text content.
+        """
+        if node is None:
+            return None
+
+        # Strategy 1: External File via 'filename' attribute
+        filename = node.get("filename")
+        if filename:
+            # Resolve path relative to the XML file location
+            base_dir = os.path.dirname(os.path.abspath(self.xml_file_path))
+            json_path = os.path.join(base_dir, filename)
+
+            if not os.path.exists(json_path):
+                raise FontScalerError(f"External JSON file not found: {json_path}")
+
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except json.JSONDecodeError as e:
+                raise FontScalerError(
+                    f"Error parsing external JSON file '{json_path}': {e}"
+                )
+
+        # Strategy 2: Inline Content
+        if node.text and node.text.strip():
+            return json.loads(node.text)
+
+        return None
 
     def parse_source_xml(self):
         if not os.path.exists(self.xml_file_path):
@@ -163,42 +199,66 @@ class FontProcessor:
             tree = ET.parse(self.xml_file_path)
             root = tree.getroot()
 
-            # 1. Parse Screen Diameters
-            diameters_node = self._find_json_node(root, XML_SCREEN_DIAMETERS_NODE)
-            if diameters_node is None:
+            # 1. Parse Screen Resolutions
+            resolutions_node = self._find_json_node(root, XML_SCREEN_RESOLUTIONS_NODE)
+            if resolutions_node is None:
                 raise FontScalerError(
-                    f"<jsonData id='{XML_SCREEN_DIAMETERS_NODE}'> not found in XML."
+                    f"<jsonData id='{XML_SCREEN_RESOLUTIONS_NODE}'> not found in XML."
                 )
 
-            diameters_config = json.loads(diameters_node.text)
-
-            if not self.target_diameters:
-                self.reference_diameter = diameters_config.get(
-                    JSON_REFERENCE_DIAMETER_KEY, self.reference_diameter
-                )
-                self.target_diameters = diameters_config.get(
-                    JSON_TARGET_DIAMETERS_KEY, []
-                )
-
-            if not self.reference_diameter or not self.target_diameters:
+            res_config = self._load_json_data(resolutions_node)
+            if not res_config:
                 raise FontScalerError(
-                    f"Invalid {XML_SCREEN_DIAMETERS_NODE} JSON configuration."
+                    f"Content for {XML_SCREEN_RESOLUTIONS_NODE} is empty or invalid."
+                )
+
+            # Parse Reference
+            ref_data = res_config.get(JSON_REFERENCE_KEY)
+            if not ref_data:
+                raise FontScalerError(
+                    f"Invalid {XML_SCREEN_RESOLUTIONS_NODE}: Missing '{JSON_REFERENCE_KEY}'"
+                )
+            self.reference_config = ScreenConfig(
+                width=ref_data[JSON_RESOLUTION_KEY][0],
+                height=ref_data[JSON_RESOLUTION_KEY][1],
+                shape=ref_data[JSON_SHAPE_KEY],
+            )
+
+            # Parse Targets
+            targets_data = res_config.get(JSON_TARGETS_KEY, [])
+            self.target_configs = []
+            for t in targets_data:
+                self.target_configs.append(
+                    ScreenConfig(
+                        width=t[JSON_RESOLUTION_KEY][0],
+                        height=t[JSON_RESOLUTION_KEY][1],
+                        shape=t[JSON_SHAPE_KEY],
+                    )
+                )
+
+            if not self.target_configs:
+                raise FontScalerError(
+                    f"Invalid {XML_SCREEN_RESOLUTIONS_NODE}: No targets specified."
                 )
 
             # 2. Determine Active Default Charset
             active_default_charset = DEFAULT_CHARSET
             def_charset_node = self._find_json_node(root, XML_DEFAULT_CHARSET_NODE)
             if def_charset_node is not None:
-                active_default_charset = str(json.loads(def_charset_node.text))
+                data = self._load_json_data(def_charset_node)
+                if data is not None:
+                    active_default_charset = str(data)
 
             # 3. Parse Specific Charset Maps
             charsets_node = self._find_json_node(root, XML_FONT_CHARSETS_NODE)
             charsets_map = {}
             if charsets_node is not None:
-                charsets = json.loads(charsets_node.text)
-                charsets_map = {
-                    item[JSON_FONT_ID_KEY]: item[JSON_CHARSET_KEY] for item in charsets
-                }
+                charsets = self._load_json_data(charsets_node)
+                if charsets:
+                    charsets_map = {
+                        item[JSON_FONT_ID_KEY]: item[JSON_CHARSET_KEY]
+                        for item in charsets
+                    }
             else:
                 self._warn(f"<jsonData id='{XML_FONT_CHARSETS_NODE}'> not found.")
 
@@ -249,13 +309,13 @@ class FontProcessor:
     def execute(self):
         self._info("Font processing pipeline")
         self._info(f"* Project directory: {os.path.abspath(self.project_dir)}")
-        self._info(f"* Reference diameter: {self.reference_diameter}")
-        self._info(f"* Target diameters: {self.target_diameters}")
+        self._info(f"* Reference: {self.reference_config}")
+        self._info(f"* Targets: {len(self.target_configs)} configurations")
         self._info("Starting batch processing...")
         self._validate_sources()
 
-        for diameter in self.target_diameters:
-            self._process_diameter(diameter)
+        for config in self.target_configs:
+            self._process_resolution(config)
 
         if self.table_filename:
             self._generate_markdown_report()
@@ -275,9 +335,9 @@ class FontProcessor:
             msg = f"Missing {len(missing)} Source TTF File(s): {file_list}"
             raise FontScalerError(msg)
 
-    def _process_diameter(self, target_diameter):
-        self._info(f"Processing target diameter: {target_diameter}")
-        target_dir, target_xml = self._prepare_target(target_diameter)
+    def _process_resolution(self, target_config: ScreenConfig):
+        self._info(f"Processing target: {target_config.key}")
+        target_dir, target_xml = self._prepare_target(target_config)
 
         target_tree = ET.parse(target_xml)
         target_root = target_tree.getroot()
@@ -288,7 +348,7 @@ class FontProcessor:
 
         work_batches = defaultdict(list)
         for task in self.font_tasks:
-            target_size = self._calculate_size(task.reference_size, target_diameter)
+            target_size = self._calculate_size(task.reference_size, target_config)
             task = dataclasses.replace(task, target_size=target_size)
             work_batches[(task.ttf_filename, task.charset)].append(task)
 
@@ -337,63 +397,73 @@ class FontProcessor:
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
 
     def _generate_markdown_report(self):
-        all_diameters = sorted(
-            list(set([self.reference_diameter] + self.target_diameters))
-        )
+        # We include reference in the list for the report
+        all_configs = [self.reference_config] + self.target_configs
 
         if self.table_filename == "-":
-            # Write directly to stdout without closing it
-            self._write_report_content(sys.stdout, all_diameters)
+            self._write_report_content(sys.stdout, all_configs)
         else:
-            # Write to a file
             full_table_path = os.path.join(self.project_dir, self.table_filename)
             self._info(f"Generating markdown report: {full_table_path}")
             try:
                 with open(full_table_path, "w", encoding="utf-8") as f:
-                    self._write_report_content(f, all_diameters)
+                    self._write_report_content(f, all_configs)
             except IOError as e:
                 raise FontScalerError(
                     f"Failed to write table to {full_table_path}: {e}"
                 )
 
-    def _write_report_content(self, f, diameters):
-        """Internal helper to write the report content to any open file-like object."""
+    def _write_report_content(self, f, configs):
         f.write("# Font sizes by element\n\n")
-        self._write_matrix_table(f, diameters)
+        self._write_matrix_table(f, configs)
         f.write("\n")
         f.write("# Font sizes by resolution\n\n")
-        self._write_resolution_list_table(f, diameters)
+        self._write_resolution_list_table(f, configs)
 
-    def _write_matrix_table(self, f, diameters):
-        headers = ["Element", "Font"] + [str(d) for d in diameters]
+    def _write_matrix_table(self, f, configs):
+        headers = ["Element", "Font"] + [
+            f"{c.width}x{c.height}\n({c.shape})" for c in configs
+        ]
         rows = []
         for task in self.font_tasks:
             el_text, font_text = self._humanize_names(task)
             row_data = [el_text, font_text]
-            for d in diameters:
-                size = self._calculate_size(task.reference_size, d)
-                row_data.append(str(size))
+            for c in configs:
+                if c == self.reference_config:
+                    row_data.append(str(task.reference_size))
+                else:
+                    size = self._calculate_size(task.reference_size, c)
+                    row_data.append(str(size))
             rows.append(row_data)
-        alignments = [True, True] + [False] * len(diameters)
+        alignments = [True, True] + [False] * len(configs)
         self._write_formatted_table(f, headers, rows, alignments)
 
-    def _write_resolution_list_table(self, f, diameters):
-        headers = ["Resolution", "Element", "Font", "Size"]
+    def _write_resolution_list_table(self, f, configs):
+        headers = ["Resolution", "Shape", "Element", "Font", "Size"]
         rows = []
-        for d in diameters:
+        for c in configs:
             for task in self.font_tasks:
                 el_text, font_text = self._humanize_names(task)
-                size = self._calculate_size(task.reference_size, d)
+                if c == self.reference_config:
+                    size = task.reference_size
+                else:
+                    size = self._calculate_size(task.reference_size, c)
                 rows.append(
                     {
-                        "sort_dia": d,
+                        "sort_res": c.width * c.height,
                         "sort_elem": el_text,
-                        "data": [f"{d} x {d}", el_text, font_text, str(size)],
+                        "data": [
+                            f"{c.width} x {c.height}",
+                            c.shape,
+                            el_text,
+                            font_text,
+                            str(size),
+                        ],
                     }
                 )
-        rows.sort(key=lambda x: (x["sort_dia"], x["sort_elem"]))
+        rows.sort(key=lambda x: (x["sort_res"], x["sort_elem"]))
         clean_rows = [r["data"] for r in rows]
-        alignments = [False, True, True, False]
+        alignments = [False, True, True, True, False]
         self._write_formatted_table(f, headers, clean_rows, alignments)
 
     def _humanize_names(self, task) -> Tuple[str, str]:
@@ -411,22 +481,29 @@ class FontProcessor:
         return el_text, font_text
 
     def _write_formatted_table(self, f, headers, rows, is_left_align):
-        col_widths = [len(h) for h in headers]
+        header_lines = [h.split("\n") for h in headers]
+        max_header_lines = max(len(h) for h in header_lines)
+        for h in header_lines:
+            while len(h) < max_header_lines:
+                h.insert(0, "")
+
+        col_widths = [0] * len(headers)
+        for i, h_lines in enumerate(header_lines):
+            width = max(len(line) for line in h_lines)
+            col_widths[i] = width
+
         for row in rows:
             for i, cell in enumerate(row):
                 col_widths[i] = max(col_widths[i], len(cell), 3)
 
-        def write_row(parts):
-            formatted_parts = []
-            for i, part in enumerate(parts):
-                width = col_widths[i]
-                if is_left_align[i]:
-                    formatted_parts.append(f"{part:<{width}}")
-                else:
-                    formatted_parts.append(f"{part:>{width}}")
-            f.write("| " + " | ".join(formatted_parts) + " |\n")
+        for line_idx in range(max_header_lines):
+            parts = []
+            for col_idx in range(len(headers)):
+                txt = header_lines[col_idx][line_idx]
+                width = col_widths[col_idx]
+                parts.append(f"{txt:^{width}}")
+            f.write("| " + " | ".join(parts) + " |\n")
 
-        write_row(headers)
         sep_parts = []
         for i in range(len(headers)):
             width = col_widths[i]
@@ -436,11 +513,23 @@ class FontProcessor:
                 else ("-" * (width - 1) + ":")
             )
         f.write("| " + " | ".join(sep_parts) + " |\n")
-        for row in rows:
-            write_row(row)
 
-    def _prepare_target(self, diameter):
-        dir_name = TARGET_RESOURCES_DIR_TEMPLATE.format(diameter=diameter)
+        for row in rows:
+            formatted_parts = []
+            for i, part in enumerate(row):
+                width = col_widths[i]
+                if is_left_align[i]:
+                    formatted_parts.append(f"{part:<{width}}")
+                else:
+                    formatted_parts.append(f"{part:>{width}}")
+            f.write("| " + " | ".join(formatted_parts) + " |\n")
+
+    def _prepare_target(self, target_config: ScreenConfig):
+        dir_name = TARGET_RESOURCES_DIR_TEMPLATE.format(
+            shape=target_config.shape,
+            width=target_config.width,
+            height=target_config.height,
+        )
         target_resources_dir = os.path.join(self.project_dir, dir_name)
         target_fonts_dir = os.path.join(target_resources_dir, self.fonts_subdir)
         if not os.path.exists(target_fonts_dir):
@@ -462,10 +551,18 @@ class FontProcessor:
         if hasattr(ET, "indent"):
             ET.indent(tree, space="    ", level=0)
 
-    def _calculate_size(self, original_size, target_diameter):
-        return int(
-            round(float(original_size) / self.reference_diameter * target_diameter)
-        )
+    def _calculate_size(self, original_size, target_config: ScreenConfig):
+        # Improved Heuristic:
+        # Calculate scaling factors for both dimensions and pick the minimum.
+        # This ensures the font fits within the constraints of BOTH width and height,
+        # preserving identity when the screen sizes match, even if they aren't square.
+
+        w_ratio = target_config.width / self.reference_config.width
+        h_ratio = target_config.height / self.reference_config.height
+
+        scale_factor = min(w_ratio, h_ratio)
+
+        return int(round(original_size * scale_factor))
 
     def _info(self, message):
         print(message, file=sys.stderr)
