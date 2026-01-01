@@ -196,8 +196,13 @@ make clean
 
 ## About
 
-```bash
+```text
 garmin-font-scaler --about
+
+garmin-font-scaler: bitmap font scaling automation for Garmin screen resolutions
+├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
+├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler
+└─ licence:    MIT https://opensource.org/licenses/MIT
 ```
 
 ## License
