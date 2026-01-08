@@ -74,6 +74,13 @@ def main():
     )
 
     parser.add_argument(
+        "-p",
+        "--padding",
+        type=int,
+        help="Padding for the font characters (passed to ttf2bmp)",
+    )
+
+    parser.add_argument(
         "--table",
         nargs="?",
         const="-",  # Special value indicating STDOUT
@@ -91,6 +98,7 @@ def main():
             .with_fonts_subdir(args.fonts_subdir)
             .with_xml_file_name(args.xml_file)
             .with_font_tool_path(args.tool_path)
+            .with_font_tool_padding(args.padding)
             .with_table_filename(args.table)
             .parse_source_xml()
             .execute()
