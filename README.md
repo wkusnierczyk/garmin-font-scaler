@@ -173,6 +173,8 @@ options:
   --xml-file XML_FILE   Filename of the fonts XML (default: fonts.xml)
   --tool-path TOOL_PATH
                         Path to ttf2bmp executable (default: ttf2bmp)
+  -p, --padding PADDING
+                        Padding for the font characters (passed to ttf2bmp) (default: None)
   --table [TABLE]       Generate markdown table of sizes
 ```
 
@@ -206,7 +208,7 @@ make clean
 garmin-font-scaler --about
 
 garmin-font-scaler: bitmap font scaling automation for Garmin screen resolutions
-├─ version:    0.2.2
+├─ version:    0.2.3
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler
 └─ licence:    MIT https://opensource.org/licenses/MIT
