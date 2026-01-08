@@ -51,6 +51,7 @@ FONT_TOOL_CHARSET_OPTION = "-c"
 FONT_TOOL_HINTING_OPTION = "-hinting"
 FONT_TOOL_SIZE_OPTION = "-s"
 FONT_TOOL_OUTPUT_OPTION = "-o"
+FONT_TOOL_PADDING_OPTION = "-p"
 
 FNT_FILENAME_PARSE_REGEX = r"^(.*)-(\d+)\.fnt$"
 
@@ -102,6 +103,7 @@ class FontProcessor:
         self.fonts_subdir = DEFAULT_FONTS_SUBDIR
         self.xml_file_name = DEFAULT_XML_FILENAME
         self.font_tool_path = DEFAULT_TOOL_PATH
+        self.font_tool_padding = None
 
         self.resources_fonts_path = ""
         self.xml_file_path = ""
@@ -152,6 +154,11 @@ class FontProcessor:
     def with_font_tool_path(self, font_tool_path=None):
         if font_tool_path:
             self.font_tool_path = font_tool_path
+        return self
+
+    def with_font_tool_padding(self, font_tool_padding=None):
+        if font_tool_padding is not None:
+            self.font_tool_padding = font_tool_padding
         return self
 
     def with_table_filename(self, table_filename=None):
@@ -369,6 +376,11 @@ class FontProcessor:
                 FONT_TOOL_OUTPUT_OPTION,
                 target_dir,
             ]
+
+            if self.font_tool_padding is not None:
+                font_tool_command.extend(
+                    [FONT_TOOL_PADDING_OPTION, str(self.font_tool_padding)]
+                )
 
             try:
                 subprocess.run(
