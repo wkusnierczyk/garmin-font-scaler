@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from garmin_font_scaler.core import FontProcessor
+from garmin_font_scaler.core import FontProcessor, FontScalerError
 
 # Updated Sample XML with new JSON format
 SAMPLE_XML = """
@@ -62,3 +62,99 @@ def test_pipeline_execution(workspace):
     output_xml = output_dir_rect / "fonts.xml"
     content = output_xml.read_text()
     assert "jsonData" not in content
+
+
+STROKE_XML = """
+<resources>
+    <fonts>
+        <font id="Time" filename="Ubuntu-Bold-60.fnt" />
+        <font id="TimeLarge" filename="Ubuntu-Bold-80.fnt" />
+        <font id="TimeHollow" filename="Ubuntu-Bold-60.fnt" stroke="1.2" />
+    </fonts>
+    <jsonData id="ScreenResolutions">{
+        "reference": { "resolution": [416, 416], "shape": "round" },
+        "targets": [
+            { "resolution": [416, 416], "shape": "round" },
+            { "resolution": [360, 360], "shape": "round" }
+        ]
+    }</jsonData>
+</resources>
+"""
+
+
+def _stroke_workspace(tmp_path, xml):
+    project_dir = tmp_path / "stroke_project"
+    fonts_dir = project_dir / "resources" / "fonts"
+    fonts_dir.mkdir(parents=True)
+    (fonts_dir / "fonts.xml").write_text(xml, encoding="utf-8")
+    (fonts_dir / "Ubuntu-Bold.ttf").write_text("dummy binary content")
+    return project_dir
+
+
+def _calls(project_dir):
+    processor = FontProcessor().with_project_dir(str(project_dir))
+    with patch("subprocess.run") as mock_run:
+        processor.parse_source_xml().execute()
+    return [call[0][0] for call in mock_run.call_args_list]
+
+
+def test_stroke_gets_its_own_ttf2bmp_call(tmp_path):
+    project_dir = _stroke_workspace(tmp_path, STROKE_XML)
+    calls = _calls(project_dir)
+
+    # Per target: one call for the two filled sizes, one for the hollow font.
+    assert len(calls) == 4
+    filled = [c for c in calls if "-stroke" not in c]
+    hollow = [c for c in calls if "-stroke" in c]
+    assert len(filled) == 2 and len(hollow) == 2
+    for c in hollow:
+        assert c[c.index("-s") + 1] in ("60", "52")
+    strokes = sorted(c[c.index("-stroke") + 1] for c in hollow)
+    assert strokes == ["1.04", "1.2"]
+
+
+def test_stroke_target_xml(tmp_path):
+    project_dir = _stroke_workspace(tmp_path, STROKE_XML)
+    _calls(project_dir)
+
+    xml = (project_dir / "resources-round-360x360" / "fonts" / "fonts.xml").read_text()
+    # The hollow font points at its own file; the filled one at the same size does not.
+    assert 'id="TimeHollow" filename="Ubuntu-Bold-52-stroke1p04.fnt"' in xml
+    assert 'id="Time" filename="Ubuntu-Bold-52.fnt"' in xml
+    # stroke is the scaler's configuration and must not reach a compiled resource.
+    assert "stroke=" not in xml
+
+
+def test_invalid_stroke_is_refused(tmp_path):
+    for bad in ("0", "-1", "wide", "nan", "inf"):
+        xml = STROKE_XML.replace('stroke="1.2"', f'stroke="{bad}"')
+        project_dir = _stroke_workspace(tmp_path / bad, xml)
+        processor = FontProcessor().with_project_dir(str(project_dir))
+        with pytest.raises(FontScalerError):
+            processor.parse_source_xml()
+
+
+def test_table_has_a_stroke_column_only_with_strokes(tmp_path):
+    with_stroke = _stroke_workspace(tmp_path / "a", STROKE_XML)
+    without = _stroke_workspace(
+        tmp_path / "b",
+        STROKE_XML.replace(
+            '<font id="TimeHollow" filename="Ubuntu-Bold-60.fnt" stroke="1.2" />', ""
+        ),
+    )
+    tables = {}
+    for name, project_dir in (("with", with_stroke), ("without", without)):
+        processor = (
+            FontProcessor()
+            .with_project_dir(str(project_dir))
+            .with_table_filename("fonts.md")
+        )
+        with patch("subprocess.run"):
+            processor.parse_source_xml().execute()
+        tables[name] = (project_dir / "fonts.md").read_text()
+
+    assert "Stroke" in tables["with"]
+    assert "Ubuntu bold, hollow" in tables["with"]
+    assert "1.04" in tables["with"]
+    assert "Stroke" not in tables["without"]
+    assert "hollow" not in tables["without"]
