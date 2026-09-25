@@ -71,7 +71,8 @@ This ensures that a line of text that fits perfectly across the width of the rou
 
 * Python 3.7+
 * The [`ttf2bmp` open-source command-line tool](https://github.com/wkusnierczyk/ttf2bmp)  
-  Hollow fonts (`stroke`) need a `ttf2bmp` with the `--stroke` option ([ttf2bmp#20](https://github.com/wkusnierczyk/ttf2bmp/issues/20)).
+  Hollow fonts (`stroke`) need a `ttf2bmp` with the `--stroke` option, added in
+  [ttf2bmp#21](https://github.com/wkusnierczyk/ttf2bmp/pull/21) after v0.2.1.
 
 ## Installation
 
@@ -146,21 +147,26 @@ In your `fonts.xml`, add `jsonData` tags pointing to the files you just created.
 #### Hollow fonts
 
 Add `stroke` to a `<font>` to generate it as an outline rather than filled. The value is the outline width in
-**reference pixels**, and it may be fractional:
+**reference pixels**, written as a plain decimal above `0` and at most `1000`:
 
 ```xml
 <font id="TimeHollow" filename="SUSEMono-Bold-54.fnt" stroke="1.2" antialias="true" />
 ```
 
 * **The stroke scales with the screen.** It is multiplied by the same factor $k$ as the size, but not rounded to
-  whole pixels: `ttf2bmp` draws fractional strokes. It is rounded to two decimals, and never passed below `ttf2bmp`'s
-  minimum of `0.125`. With a 416x416 reference, `stroke="1.2"` gives `1.04` at 360x360 and `1.34` at 466x466.
+  whole pixels: `ttf2bmp` draws fractional strokes. A scaled stroke is rounded to two decimals; at the reference
+  resolution the value is passed as written. It is never passed below `ttf2bmp`'s minimum of `0.125`, with a warning
+  when a scaled stroke would fall under it. With a 416x416 reference, `stroke="1.2"` gives `1.04` at 360x360 and
+  `1.34` at 466x466.
 * **A filled and a hollow font of the same face and size can coexist.** Hollow output is named with the stroke,
   the decimal point written as `p` (`SUSEMono-Bold-47-stroke1p04.fnt`), and each generated `fonts.xml` points
   every font id at its own file.
 * **`stroke` is not copied into the generated `fonts.xml` files.** It is the scaler's configuration, not a
   Connect IQ attribute.
-* **The report** marks hollow fonts (`SUSEMono bold, hollow`) and adds a `Stroke` column with the scaled width.
+* **The source `fonts.xml` must stay off the Connect IQ resource path** when it has a `stroke`. There, the hollow
+  id still names the filled reference file, and `stroke` is not an attribute Connect IQ knows.
+* **The report** marks hollow fonts. The by-element table gives the reference stroke next to the font
+  (`SUSEMono bold, hollow 1.2`), and the by-resolution table adds a `Stroke` column with the scaled width.
   Without any `stroke`, the report and all generated files are exactly as before.
 
 #### Execute

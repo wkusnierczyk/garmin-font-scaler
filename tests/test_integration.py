@@ -1,4 +1,5 @@
 import pytest
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 from garmin_font_scaler.core import FontProcessor, FontScalerError
 
@@ -106,27 +107,74 @@ def test_stroke_gets_its_own_ttf2bmp_call(tmp_path):
     assert len(calls) == 4
     filled = [c for c in calls if "-stroke" not in c]
     hollow = [c for c in calls if "-stroke" in c]
-    assert len(filled) == 2 and len(hollow) == 2
-    for c in hollow:
-        assert c[c.index("-s") + 1] in ("60", "52")
-    strokes = sorted(c[c.index("-stroke") + 1] for c in hollow)
-    assert strokes == ["1.04", "1.2"]
+    assert sorted(c[c.index("-s") + 1] for c in filled) == ["52,69", "60,80"]
+    assert sorted(
+        (c[c.index("-s") + 1], c[c.index("-stroke") + 1]) for c in hollow
+    ) == [("52", "1.04"), ("60", "1.2")]
+
+
+def _target_fonts(project_dir, target):
+    path = project_dir / f"resources-{target}" / "fonts" / "fonts.xml"
+    return {n.get("id"): n.attrib for n in ET.parse(path).getroot().iter("font")}
 
 
 def test_stroke_target_xml(tmp_path):
     project_dir = _stroke_workspace(tmp_path, STROKE_XML)
     _calls(project_dir)
 
-    xml = (project_dir / "resources-round-360x360" / "fonts" / "fonts.xml").read_text()
+    fonts = _target_fonts(project_dir, "round-360x360")
     # The hollow font points at its own file; the filled one at the same size does not.
-    assert 'id="TimeHollow" filename="Ubuntu-Bold-52-stroke1p04.fnt"' in xml
-    assert 'id="Time" filename="Ubuntu-Bold-52.fnt"' in xml
+    assert fonts["TimeHollow"]["filename"] == "Ubuntu-Bold-52-stroke1p04.fnt"
+    assert fonts["Time"]["filename"] == "Ubuntu-Bold-52.fnt"
     # stroke is the scaler's configuration and must not reach a compiled resource.
-    assert "stroke=" not in xml
+    assert all("stroke" not in attrib for attrib in fonts.values())
+
+
+def test_strokes_at_one_size(tmp_path):
+    xml = STROKE_XML.replace(
+        '<font id="TimeHollow" filename="Ubuntu-Bold-60.fnt" stroke="1.2" />',
+        '<font id="Thin" filename="Ubuntu-Bold-60.fnt" stroke="1.2" />'
+        '<font id="ThinToo" filename="Ubuntu-Bold-60.fnt" stroke="1.2" />'
+        '<font id="Thick" filename="Ubuntu-Bold-60.fnt" stroke="2.5" />',
+    )
+    project_dir = _stroke_workspace(tmp_path, xml)
+    calls = _calls(project_dir)
+
+    # Per target: the filled call and one per distinct stroke; equal strokes share one.
+    assert len(calls) == 6
+    fonts = _target_fonts(project_dir, "round-416x416")
+    assert fonts["Thin"]["filename"] == "Ubuntu-Bold-60-stroke1p2.fnt"
+    assert fonts["ThinToo"]["filename"] == "Ubuntu-Bold-60-stroke1p2.fnt"
+    assert fonts["Thick"]["filename"] == "Ubuntu-Bold-60-stroke2p5.fnt"
+    assert fonts["Time"]["filename"] == "Ubuntu-Bold-60.fnt"
+
+
+def test_without_stroke_the_command_is_unchanged(tmp_path):
+    xml = STROKE_XML.replace(
+        '<font id="TimeHollow" filename="Ubuntu-Bold-60.fnt" stroke="1.2" />', ""
+    )
+    project_dir = _stroke_workspace(tmp_path, xml)
+    calls = _calls(project_dir)
+    ttf = str(project_dir / "resources" / "fonts" / "Ubuntu-Bold.ttf")
+    out = str(project_dir / "resources-round-416x416" / "fonts")
+    # The exact call main makes: no stroke option, the default charset, no padding.
+    assert calls[0] == [
+        "ttf2bmp",
+        "-f",
+        ttf,
+        "-c",
+        "0123456789:",
+        "-hinting",
+        "none",
+        "-s",
+        "60,80",
+        "-o",
+        out,
+    ]
 
 
 def test_invalid_stroke_is_refused(tmp_path):
-    for bad in ("0", "-1", "wide", "nan", "inf"):
+    for bad in ("0", "-1", "wide", "nan", "inf", "1_0", " 1", "1e3", "2000", ""):
         xml = STROKE_XML.replace('stroke="1.2"', f'stroke="{bad}"')
         project_dir = _stroke_workspace(tmp_path / bad, xml)
         processor = FontProcessor().with_project_dir(str(project_dir))
@@ -155,6 +203,8 @@ def test_table_has_a_stroke_column_only_with_strokes(tmp_path):
 
     assert "Stroke" in tables["with"]
     assert "Ubuntu bold, hollow" in tables["with"]
+    # The by-element table lists reference sizes, and so the reference stroke.
+    assert "Ubuntu bold, hollow 1.2" in tables["with"]
     assert "1.04" in tables["with"]
     assert "Stroke" not in tables["without"]
     assert "hollow" not in tables["without"]

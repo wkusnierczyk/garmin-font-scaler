@@ -59,6 +59,11 @@ FONT_TOOL_STROKE_OPTION = "-stroke"
 # rounded to STROKE_DECIMALS and never passed narrower than this.
 MIN_STROKE = 0.125
 STROKE_DECIMALS = 2
+# A sanity bound, far wider than any glyph stem. It also keeps every value in the
+# range where Python's repr and Go's formatting both write plain decimals.
+MAX_STROKE = 1000
+# A plain decimal: float() alone would also take "1_0", "1e3" and surrounding spaces.
+STROKE_PATTERN = r"\d+(\.\d*)?|\.\d+"
 
 FNT_FILENAME_PARSE_REGEX = r"^(.*)-(\d+)\.fnt$"
 
@@ -322,13 +327,11 @@ class FontProcessor:
         value = font_node.get(XML_FONT_NODE_STROKE_ATTRIBUTE)
         if value is None:
             return None
-        try:
-            stroke = float(value)
-        except ValueError:
-            stroke = float("nan")
-        if not (0 < stroke < float("inf")):
+        stroke = float(value) if re.fullmatch(STROKE_PATTERN, value) else 0
+        if not (0 < stroke <= MAX_STROKE):
             raise FontScalerError(
-                f"Font '{font_id}': stroke must be a positive number of pixels, not '{value}'"
+                f"Font '{font_id}': stroke must be a number of pixels above 0 and "
+                f"at most {MAX_STROKE}, not '{value}'"
             )
         return stroke
 
@@ -443,21 +446,29 @@ class FontProcessor:
         self._pretty_print_xml(target_tree)
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
 
-    def _calculate_stroke(self, task: FontTask, target_config: ScreenConfig):
+    def _calculate_stroke(
+        self, task: FontTask, target_config: ScreenConfig, warn: bool = True
+    ):
         """The stroke for one resolution: scaled by the same factor as the size, but not
-        rounded to whole pixels, since ttf2bmp draws fractional strokes."""
+        rounded to whole pixels, since ttf2bmp draws fractional strokes. Scaled values
+        are rounded to STROKE_DECIMALS; at the reference resolution the configured
+        value is passed as written."""
         if task.reference_stroke is None:
             return None
-        stroke = round(
-            task.reference_stroke * self._scale_factor(target_config), STROKE_DECIMALS
-        )
+        factor = self._scale_factor(target_config)
+        stroke = task.reference_stroke * factor
         if stroke < MIN_STROKE:
-            self._warn(
-                f"Font '{task.font_id}' at {target_config.key}: stroke {stroke} is "
-                f"below ttf2bmp's minimum, using {MIN_STROKE}"
-            )
-            stroke = MIN_STROKE
-        return stroke
+            if warn:
+                self._warn(
+                    f"Font '{task.font_id}' at {target_config.key}: stroke "
+                    f"{round(stroke, 3)} is below ttf2bmp's minimum, using {MIN_STROKE}"
+                )
+            return MIN_STROKE
+        if factor == 1:
+            return task.reference_stroke
+        # Rounding cannot take a value at or above the minimum below it by more than
+        # the rounding step; keep the minimum rather than warn about the rounding.
+        return max(MIN_STROKE, round(stroke, STROKE_DECIMALS))
 
     @staticmethod
     def _format_stroke(stroke: float) -> str:
@@ -511,6 +522,9 @@ class FontProcessor:
         rows = []
         for task in self.font_tasks:
             element_text, font_text = self._humanize_names(task)
+            if task.reference_stroke is not None:
+                # This table lists reference sizes, so it gives the reference stroke.
+                font_text += " " + self._format_stroke(task.reference_stroke)
             row_data = [element_text, font_text]
             for config in configs:
                 if config.key == self.reference_config.key:
@@ -545,7 +559,7 @@ class FontProcessor:
                     str(size),
                 ]
                 if with_stroke:
-                    stroke = self._calculate_stroke(task, config)
+                    stroke = self._calculate_stroke(task, config, warn=False)
                     data.append("" if stroke is None else self._format_stroke(stroke))
                 rows.append(
                     {
