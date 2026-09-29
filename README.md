@@ -236,7 +236,7 @@ make clean
 garmin-font-scaler --about
 
 garmin-font-scaler: bitmap font scaling automation for Garmin screen resolutions
-├─ version:    0.2.3
+├─ version:    0.3.0
 ├─ developer:  mailto:waclaw.kusnierczyk@gmail.com
 ├─ source:     https://github.com/wkusnierczyk/garmin-font-scaler
 └─ licence:    MIT https://opensource.org/licenses/MIT
