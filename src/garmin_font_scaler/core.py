@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import json
 import os
@@ -5,9 +7,7 @@ import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-
 from collections import defaultdict
-from typing import Optional, Tuple, List
 
 # --- Configuration Constants ---
 
@@ -28,7 +28,6 @@ TARGET_RESOURCES_DIR_TEMPLATE = "resources-{shape}-{width}x{height}"
 
 XML_DEFAULT_CHARSET_NODE = "DefaultCharset"
 XML_FONT_CHARSETS_NODE = "FontCharsets"
-# Updated JSON Node ID
 XML_SCREEN_RESOLUTIONS_NODE = "ScreenResolutions"
 
 JSON_REFERENCE_KEY = "reference"
@@ -41,6 +40,7 @@ JSON_CHARSET_KEY = "fontCharset"
 XML_FONT_NODE_PATTERN = ".//font"
 XML_FONT_NODE_ID_ATTRIBUTE = "id"
 XML_FONT_NODE_FILENAME_ATTRIBUTE = "filename"
+XML_FONT_NODE_STROKE_ATTRIBUTE = "stroke"
 
 XML_JSON_NODE_PATTERN = ".//jsonData"
 XML_JSON_NODE_ID_ATTRIBUTE = "id"
@@ -52,6 +52,18 @@ FONT_TOOL_CHARSET_OPTION = "-c"
 FONT_TOOL_HINTING_OPTION = "-hinting"
 FONT_TOOL_SIZE_OPTION = "-s"
 FONT_TOOL_OUTPUT_OPTION = "-o"
+FONT_TOOL_PADDING_OPTION = "-p"
+FONT_TOOL_STROKE_OPTION = "-stroke"
+
+# ttf2bmp's narrowest outline: one supersample of its 8x render. A scaled stroke is
+# rounded to STROKE_DECIMALS and never passed narrower than this.
+MIN_STROKE = 0.125
+STROKE_DECIMALS = 2
+# A sanity bound, far wider than any glyph stem. It also keeps every value in the
+# range where Python's repr and Go's formatting both write plain decimals.
+MAX_STROKE = 1000
+# A plain decimal: float() alone would also take "1_0", "1e3" and surrounding spaces.
+STROKE_PATTERN = r"\d+(\.\d*)?|\.\d+"
 
 FNT_FILENAME_PARSE_REGEX = r"^(.*)-(\d+)\.fnt$"
 
@@ -63,8 +75,6 @@ DEFAULT_TABLE_FILENAME = "fonts.md"
 
 class FontScalerError(Exception):
     """Base exception for Font Scaler errors."""
-
-    pass
 
 
 # --- Data Structures ---
@@ -78,8 +88,11 @@ class FontTask:
     fnt_filename: str
     ttf_filename: str
     reference_size: int
-    target_size: Optional[int]
+    target_size: int | None
     charset: str
+    # Outline width in reference pixels; None for a filled font.
+    reference_stroke: float | None = None
+    target_stroke: float | None = None
 
 
 @dataclasses.dataclass
@@ -103,6 +116,7 @@ class FontProcessor:
         self.fonts_subdir = DEFAULT_FONTS_SUBDIR
         self.xml_file_name = DEFAULT_XML_FILENAME
         self.font_tool_path = DEFAULT_TOOL_PATH
+        self.font_tool_padding = None
 
         self.resources_fonts_path = ""
         self.xml_file_path = ""
@@ -114,7 +128,7 @@ class FontProcessor:
             height=DEFAULT_REFERENCE_CONFIG["resolution"][1],
             shape=DEFAULT_REFERENCE_CONFIG["shape"],
         )
-        self.target_configs: List[ScreenConfig] = []
+        self.target_configs: list[ScreenConfig] = []
         self.font_tasks = []
 
         self.table_filename = None
@@ -153,6 +167,11 @@ class FontProcessor:
     def with_font_tool_path(self, font_tool_path=None):
         if font_tool_path:
             self.font_tool_path = font_tool_path
+        return self
+
+    def with_font_tool_padding(self, font_tool_padding=None):
+        if font_tool_padding is not None:
+            self.font_tool_padding = font_tool_padding
         return self
 
     def with_table_filename(self, table_filename=None):
@@ -206,33 +225,33 @@ class FontProcessor:
                     f"<jsonData id='{XML_SCREEN_RESOLUTIONS_NODE}'> not found in XML."
                 )
 
-            res_config = self._load_json_data(resolutions_node)
-            if not res_config:
+            resolution_config = self._load_json_data(resolutions_node)
+            if not resolution_config:
                 raise FontScalerError(
                     f"Content for {XML_SCREEN_RESOLUTIONS_NODE} is empty or invalid."
                 )
 
             # Parse Reference
-            ref_data = res_config.get(JSON_REFERENCE_KEY)
-            if not ref_data:
+            reference_data = resolution_config.get(JSON_REFERENCE_KEY)
+            if not reference_data:
                 raise FontScalerError(
                     f"Invalid {XML_SCREEN_RESOLUTIONS_NODE}: Missing '{JSON_REFERENCE_KEY}'"
                 )
             self.reference_config = ScreenConfig(
-                width=ref_data[JSON_RESOLUTION_KEY][0],
-                height=ref_data[JSON_RESOLUTION_KEY][1],
-                shape=ref_data[JSON_SHAPE_KEY],
+                width=reference_data[JSON_RESOLUTION_KEY][0],
+                height=reference_data[JSON_RESOLUTION_KEY][1],
+                shape=reference_data[JSON_SHAPE_KEY],
             )
 
             # Parse Targets
-            targets_data = res_config.get(JSON_TARGETS_KEY, [])
+            targets_data = resolution_config.get(JSON_TARGETS_KEY, [])
             self.target_configs = []
-            for t in targets_data:
+            for target in targets_data:
                 self.target_configs.append(
                     ScreenConfig(
-                        width=t[JSON_RESOLUTION_KEY][0],
-                        height=t[JSON_RESOLUTION_KEY][1],
-                        shape=t[JSON_SHAPE_KEY],
+                        width=target[JSON_RESOLUTION_KEY][0],
+                        height=target[JSON_RESOLUTION_KEY][1],
+                        shape=target[JSON_SHAPE_KEY],
                     )
                 )
 
@@ -243,9 +262,9 @@ class FontProcessor:
 
             # 2. Determine Active Default Charset
             active_default_charset = DEFAULT_CHARSET
-            def_charset_node = self._find_json_node(root, XML_DEFAULT_CHARSET_NODE)
-            if def_charset_node is not None:
-                data = self._load_json_data(def_charset_node)
+            default_charset_node = self._find_json_node(root, XML_DEFAULT_CHARSET_NODE)
+            if default_charset_node is not None:
+                data = self._load_json_data(default_charset_node)
                 if data is not None:
                     active_default_charset = str(data)
 
@@ -280,6 +299,7 @@ class FontProcessor:
                 font_size = int(match.group(2))
 
                 charset = charsets_map.get(font_id, active_default_charset)
+                reference_stroke = self._parse_stroke(font_node, font_id)
 
                 task = FontTask(
                     xml_node=font_node,
@@ -290,6 +310,7 @@ class FontProcessor:
                     reference_size=font_size,
                     target_size=None,
                     charset=charset,
+                    reference_stroke=reference_stroke,
                 )
                 self.font_tasks.append(task)
 
@@ -299,6 +320,18 @@ class FontProcessor:
             raise FontScalerError(f"Parsing JSON data in XML failed with error: {e}")
 
         return self
+
+    def _parse_stroke(self, font_node, font_id) -> float | None:
+        value = font_node.get(XML_FONT_NODE_STROKE_ATTRIBUTE)
+        if value is None:
+            return None
+        stroke = float(value) if re.fullmatch(STROKE_PATTERN, value) else 0
+        if not (0 < stroke <= MAX_STROKE):
+            raise FontScalerError(
+                f"Font '{font_id}': stroke must be a number of pixels above 0 and "
+                f"at most {MAX_STROKE}, not '{value}'"
+            )
+        return stroke
 
     def _find_json_node(self, root, json_id):
         for node in root.findall(XML_JSON_NODE_PATTERN):
@@ -324,7 +357,7 @@ class FontProcessor:
 
     def _validate_sources(self):
         missing = []
-        required_ttf_filenames = set(task.ttf_filename for task in self.font_tasks)
+        required_ttf_filenames = {task.ttf_filename for task in self.font_tasks}
         for ttf_filename in required_ttf_filenames:
             path = os.path.join(self.resources_fonts_path, ttf_filename)
             if not os.path.exists(path):
@@ -332,8 +365,8 @@ class FontProcessor:
 
         if missing:
             file_list = ", ".join(missing)
-            msg = f"Missing {len(missing)} Source TTF File(s): {file_list}"
-            raise FontScalerError(msg)
+            message = f"Missing {len(missing)} Source TTF File(s): {file_list}"
+            raise FontScalerError(message)
 
     def _process_resolution(self, target_config: ScreenConfig):
         self._info(f"Processing target: {target_config.key}")
@@ -346,18 +379,23 @@ class FontProcessor:
             for node in target_root.findall(XML_FONT_NODE_PATTERN)
         }
 
+        # One ttf2bmp call per face, charset and stroke: the stroke applies to every size
+        # in a call, so a filled and a hollow font of one face are never batched together.
         work_batches = defaultdict(list)
         for task in self.font_tasks:
             target_size = self._calculate_size(task.reference_size, target_config)
-            task = dataclasses.replace(task, target_size=target_size)
-            work_batches[(task.ttf_filename, task.charset)].append(task)
+            target_stroke = self._calculate_stroke(task, target_config)
+            task = dataclasses.replace(
+                task, target_size=target_size, target_stroke=target_stroke
+            )
+            work_batches[(task.ttf_filename, task.charset, target_stroke)].append(task)
 
-        for (ttf_filename, charset), tasks in work_batches.items():
+        for (ttf_filename, charset, stroke), tasks in work_batches.items():
             source_ttf_path = os.path.join(self.resources_fonts_path, ttf_filename)
-            unique_sizes = sorted(list(set(task.target_size for task in tasks)))
-            size_arg = ",".join(map(str, unique_sizes))
+            unique_sizes = sorted({task.target_size for task in tasks})
+            size_argument = ",".join(map(str, unique_sizes))
 
-            font_tool_cmd = [
+            font_tool_command = [
                 self.font_tool_path,
                 FONT_TOOL_SOURCE_TTF_OPTION,
                 source_ttf_path,
@@ -366,20 +404,30 @@ class FontProcessor:
                 FONT_TOOL_HINTING_OPTION,
                 DEFAULT_HINTING,
                 FONT_TOOL_SIZE_OPTION,
-                size_arg,
+                size_argument,
                 FONT_TOOL_OUTPUT_OPTION,
                 target_dir,
             ]
 
+            if self.font_tool_padding is not None:
+                font_tool_command.extend(
+                    [FONT_TOOL_PADDING_OPTION, str(self.font_tool_padding)]
+                )
+
+            if stroke is not None:
+                font_tool_command.extend(
+                    [FONT_TOOL_STROKE_OPTION, self._format_stroke(stroke)]
+                )
+
             try:
                 subprocess.run(
-                    font_tool_cmd,
+                    font_tool_command,
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
                 for task in tasks:
-                    new_filename = f"{task.font_name}-{task.target_size}.fnt"
+                    new_filename = self._target_fnt_filename(task)
                     if task.font_id in target_node_map:
                         node = target_node_map[task.font_id]
                         node.set(XML_FONT_NODE_FILENAME_ATTRIBUTE, new_filename)
@@ -395,6 +443,46 @@ class FontProcessor:
 
         self._pretty_print_xml(target_tree)
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
+
+    def _calculate_stroke(
+        self, task: FontTask, target_config: ScreenConfig, warn: bool = True
+    ):
+        """The stroke for one resolution: scaled by the same factor as the size, but not
+        rounded to whole pixels, since ttf2bmp draws fractional strokes. Scaled values
+        are rounded to STROKE_DECIMALS; at the reference resolution the configured
+        value is passed as written."""
+        if task.reference_stroke is None:
+            return None
+        factor = self._scale_factor(target_config)
+        stroke = task.reference_stroke * factor
+        if stroke < MIN_STROKE:
+            if warn:
+                self._warn(
+                    f"Font '{task.font_id}' at {target_config.key}: stroke "
+                    f"{round(stroke, 3)} is below ttf2bmp's minimum, using {MIN_STROKE}"
+                )
+            return MIN_STROKE
+        if factor == 1:
+            return task.reference_stroke
+        # Rounding cannot take a value at or above the minimum below it by more than
+        # the rounding step; keep the minimum rather than warn about the rounding.
+        return max(MIN_STROKE, round(stroke, STROKE_DECIMALS))
+
+    @staticmethod
+    def _format_stroke(stroke: float) -> str:
+        """The shortest decimal that reads back as the same number: 1.0 is '1', 1.2 is
+        '1.2'. The same as ttf2bmp's own formatting, which names the output after it."""
+        text = repr(float(stroke))
+        return text[:-2] if text.endswith(".0") else text
+
+    def _target_fnt_filename(self, task: FontTask) -> str:
+        """The .fnt ttf2bmp writes for a task. A hollow font carries the stroke in its
+        name, with the decimal point written as 'p': Face-54-stroke1p2.fnt."""
+        name = f"{task.font_name}-{task.target_size}"
+        if task.target_stroke is not None:
+            stroke = self._format_stroke(task.target_stroke)
+            name += "-stroke" + stroke.replace(".", "p")
+        return name + ".fnt"
 
     def _generate_markdown_report(self):
         seen_keys = {self.reference_config.key}
@@ -413,68 +501,83 @@ class FontProcessor:
             try:
                 with open(full_table_path, "w", encoding="utf-8") as f:
                     self._write_report_content(f, all_configs)
-            except IOError as e:
+            except OSError as e:
                 raise FontScalerError(
                     f"Failed to write table to {full_table_path}: {e}"
                 )
 
-    def _write_report_content(self, f, configs):
-        f.write("# Font sizes by element\n\n")
-        self._write_matrix_table(f, configs)
-        f.write("\n")
-        f.write("# Font sizes by resolution\n\n")
-        self._write_resolution_list_table(f, configs)
+    def _write_report_content(self, file, configs):
+        file.write("# Font sizes by element\n\n")
+        self._write_matrix_table(file, configs)
+        file.write("\n")
+        file.write("# Font sizes by resolution\n\n")
+        self._write_resolution_list_table(file, configs)
 
-    def _write_matrix_table(self, f, configs):
+    def _write_matrix_table(self, file, configs):
         headers = ["Element", "Font"] + [
-            f"{c.width}x{c.height}\n({c.shape})" for c in configs
+            f"{config.shape}<br/>{config.width}x{config.height}" for config in configs
         ]
         rows = []
         for task in self.font_tasks:
-            el_text, font_text = self._humanize_names(task)
-            row_data = [el_text, font_text]
-            for c in configs:
-                if c.key == self.reference_config.key:
+            element_text, font_text = self._humanize_names(task)
+            if task.reference_stroke is not None:
+                # This table lists reference sizes, so it gives the reference stroke.
+                font_text += " " + self._format_stroke(task.reference_stroke)
+            row_data = [element_text, font_text]
+            for config in configs:
+                if config.key == self.reference_config.key:
                     row_data.append(str(task.reference_size))
                 else:
-                    size = self._calculate_size(task.reference_size, c)
+                    size = self._calculate_size(task.reference_size, config)
                     row_data.append(str(size))
             rows.append(row_data)
         alignments = [True, True] + [False] * len(configs)
-        self._write_formatted_table(f, headers, rows, alignments)
+        self._write_formatted_table(file, headers, rows, alignments)
 
-    def _write_resolution_list_table(self, f, configs):
+    def _write_resolution_list_table(self, file, configs):
+        # The stroke column appears only when a font has a stroke, so the tables of a
+        # configuration without one are exactly what they were before strokes existed.
+        with_stroke = self._has_strokes()
         headers = ["Resolution", "Shape", "Element", "Font", "Size"]
+        if with_stroke:
+            headers.append("Stroke")
         rows = []
-        for c in configs:
+        for config in configs:
             for task in self.font_tasks:
-                el_text, font_text = self._humanize_names(task)
-                if c.key == self.reference_config.key:
+                element_text, font_text = self._humanize_names(task)
+                if config.key == self.reference_config.key:
                     size = task.reference_size
                 else:
-                    size = self._calculate_size(task.reference_size, c)
+                    size = self._calculate_size(task.reference_size, config)
+                data = [
+                    f"{config.width} x {config.height}",
+                    config.shape,
+                    element_text,
+                    font_text,
+                    str(size),
+                ]
+                if with_stroke:
+                    stroke = self._calculate_stroke(task, config, warn=False)
+                    data.append("" if stroke is None else self._format_stroke(stroke))
                 rows.append(
                     {
-                        "sort_res": c.width * c.height,
-                        "sort_elem": el_text,
-                        "data": [
-                            f"{c.width} x {c.height}",
-                            c.shape,
-                            el_text,
-                            font_text,
-                            str(size),
-                        ],
+                        "sort_res": config.width * config.height,
+                        "sort_elem": element_text,
+                        "data": data,
                     }
                 )
         rows.sort(key=lambda x: (x["sort_res"], x["sort_elem"]))
         clean_rows = [r["data"] for r in rows]
-        alignments = [False, True, True, True, False]
-        self._write_formatted_table(f, headers, clean_rows, alignments)
+        alignments = [False, True, True, True, False] + ([False] if with_stroke else [])
+        self._write_formatted_table(file, headers, clean_rows, alignments)
 
-    def _humanize_names(self, task) -> Tuple[str, str]:
-        el_text = re.sub(r"font$", "", task.font_id, flags=re.IGNORECASE)
-        el_text = re.sub(r"([a-z])([A-Z])", r"\1 \2", el_text)
-        el_text = el_text.strip().capitalize()
+    def _has_strokes(self) -> bool:
+        return any(task.reference_stroke is not None for task in self.font_tasks)
+
+    def _humanize_names(self, task) -> tuple[str, str]:
+        element_text = re.sub(r"font$", "", task.font_id, flags=re.IGNORECASE)
+        element_text = re.sub(r"([a-z])([A-Z])", r"\1 \2", element_text)
+        element_text = element_text.strip().capitalize()
 
         parts = task.font_name.split("-")
         if parts:
@@ -483,51 +586,53 @@ class FontProcessor:
             font_text = " ".join([base] + suffixes)
         else:
             font_text = task.font_name
-        return el_text, font_text
+        if task.reference_stroke is not None:
+            font_text += ", hollow"
+        return element_text, font_text
 
-    def _write_formatted_table(self, f, headers, rows, is_left_align):
-        header_lines = [h.split("\n") for h in headers]
-        max_header_lines = max(len(h) for h in header_lines)
-        for h in header_lines:
-            while len(h) < max_header_lines:
-                h.insert(0, "")
+    def _write_formatted_table(self, file, headers, rows, is_left_align):
+        header_lines = [header.split("\n") for header in headers]
+        max_header_lines = max(len(header) for header in header_lines)
+        for header in header_lines:
+            while len(header) < max_header_lines:
+                header.insert(0, "")
 
-        col_widths = [0] * len(headers)
-        for i, h_lines in enumerate(header_lines):
-            width = max(len(line) for line in h_lines)
-            col_widths[i] = width
+        column_widths = [0] * len(headers)
+        for i, header in enumerate(header_lines):
+            width = max(len(line) for line in header)
+            column_widths[i] = width
 
         for row in rows:
             for i, cell in enumerate(row):
-                col_widths[i] = max(col_widths[i], len(cell), 3)
+                column_widths[i] = max(column_widths[i], len(cell), 3)
 
         for line_idx in range(max_header_lines):
             parts = []
-            for col_idx in range(len(headers)):
-                txt = header_lines[col_idx][line_idx]
-                width = col_widths[col_idx]
-                parts.append(f"{txt:^{width}}")
-            f.write("| " + " | ".join(parts) + " |\n")
+            for column_index in range(len(headers)):
+                text = header_lines[column_index][line_idx]
+                width = column_widths[column_index]
+                parts.append(f"{text:^{width}}")
+            file.write("| " + " | ".join(parts) + " |\n")
 
-        sep_parts = []
+        separator_parts = []
         for i in range(len(headers)):
-            width = col_widths[i]
-            sep_parts.append(
+            width = column_widths[i]
+            separator_parts.append(
                 (":" + "-" * (width - 1))
                 if is_left_align[i]
                 else ("-" * (width - 1) + ":")
             )
-        f.write("| " + " | ".join(sep_parts) + " |\n")
+        file.write("| " + " | ".join(separator_parts) + " |\n")
 
         for row in rows:
             formatted_parts = []
             for i, part in enumerate(row):
-                width = col_widths[i]
+                width = column_widths[i]
                 if is_left_align[i]:
                     formatted_parts.append(f"{part:<{width}}")
                 else:
                     formatted_parts.append(f"{part:>{width}}")
-            f.write("| " + " | ".join(formatted_parts) + " |\n")
+            file.write("| " + " | ".join(formatted_parts) + " |\n")
 
     def _prepare_target(self, target_config: ScreenConfig):
         dir_name = TARGET_RESOURCES_DIR_TEMPLATE.format(
@@ -546,6 +651,10 @@ class FontProcessor:
             root = tree.getroot()
             for json_node in root.findall(XML_JSON_NODE_PATTERN):
                 root.remove(json_node)
+            # The stroke is the scaler's configuration, not a Connect IQ attribute, and it
+            # is already applied to the bitmaps the target points at.
+            for font_node in root.findall(XML_FONT_NODE_PATTERN):
+                font_node.attrib.pop(XML_FONT_NODE_STROKE_ATTRIBUTE, None)
             self._pretty_print_xml(tree)
             tree.write(target_xml_path, encoding=XML_ENCODING, xml_declaration=True)
         except ET.ParseError:
@@ -557,17 +666,18 @@ class FontProcessor:
             ET.indent(tree, space="    ", level=0)
 
     def _calculate_size(self, original_size, target_config: ScreenConfig):
+        return round(original_size * self._scale_factor(target_config))
+
+    def _scale_factor(self, target_config: ScreenConfig) -> float:
         # Improved Heuristic:
         # Calculate scaling factors for both dimensions and pick the minimum.
         # This ensures the font fits within the constraints of BOTH width and height,
         # preserving identity when the screen sizes match, even if they aren't square.
 
-        w_ratio = target_config.width / self.reference_config.width
-        h_ratio = target_config.height / self.reference_config.height
+        width_ratio = target_config.width / self.reference_config.width
+        height_ratio = target_config.height / self.reference_config.height
 
-        scale_factor = min(w_ratio, h_ratio)
-
-        return int(round(original_size * scale_factor))
+        return min(width_ratio, height_ratio)
 
     def _info(self, message):
         print(message, file=sys.stderr)

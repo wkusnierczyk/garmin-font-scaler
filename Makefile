@@ -9,7 +9,7 @@ all: install lint test
 install:
 	$(PIP) install --upgrade pip
 	$(PIP) install -e .[dev]
-	$(PIP) install pytest pytest-mock ruff
+	$(PIP) install pytest pytest-mock ruff==0.16.9
 
 build:
 	$(PIP) install build

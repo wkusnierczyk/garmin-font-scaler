@@ -1,10 +1,10 @@
 import argparse
 import sys
-from .core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
 
+from .core import DEFAULT_PROJECT_DIR, FontProcessor, FontScalerError
 
 try:
-    from importlib.metadata import version, PackageNotFoundError
+    from importlib.metadata import PackageNotFoundError, version
 except ImportError:
     pass
 
@@ -74,6 +74,13 @@ def main():
     )
 
     parser.add_argument(
+        "-p",
+        "--padding",
+        type=int,
+        help="Padding for the font characters (passed to ttf2bmp)",
+    )
+
+    parser.add_argument(
         "--table",
         nargs="?",
         const="-",  # Special value indicating STDOUT
@@ -91,6 +98,7 @@ def main():
             .with_fonts_subdir(args.fonts_subdir)
             .with_xml_file_name(args.xml_file)
             .with_font_tool_path(args.tool_path)
+            .with_font_tool_padding(args.padding)
             .with_table_filename(args.table)
             .parse_source_xml()
             .execute()
@@ -98,7 +106,7 @@ def main():
     except FontScalerError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- the CLI's last resort: report, exit 1
         print(f"Unexpected Error: {e}", file=sys.stderr)
         sys.exit(1)
 
