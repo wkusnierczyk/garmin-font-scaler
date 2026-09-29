@@ -1,5 +1,6 @@
 import dataclasses
 import os
+
 from garmin_font_scaler.core import MIN_STROKE, FontProcessor, FontTask, ScreenConfig
 
 

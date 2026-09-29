@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Ruff
-        run: pip install ruff
+        run: pip install ruff==0.16.9  # pinned: a new ruff can fail unchanged code (#36)
 
       - name: Lint code
         # Checks for syntax errors, unused imports, etc.

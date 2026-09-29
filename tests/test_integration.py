@@ -1,6 +1,8 @@
-import pytest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
+
+import pytest
+
 from garmin_font_scaler.core import FontProcessor, FontScalerError
 
 # Updated Sample XML with new JSON format

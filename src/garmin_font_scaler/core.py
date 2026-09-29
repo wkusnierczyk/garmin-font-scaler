@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import json
 import os
@@ -5,9 +7,7 @@ import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-
 from collections import defaultdict
-from typing import Optional, Tuple, List
 
 # --- Configuration Constants ---
 
@@ -76,8 +76,6 @@ DEFAULT_TABLE_FILENAME = "fonts.md"
 class FontScalerError(Exception):
     """Base exception for Font Scaler errors."""
 
-    pass
-
 
 # --- Data Structures ---
 
@@ -90,11 +88,11 @@ class FontTask:
     fnt_filename: str
     ttf_filename: str
     reference_size: int
-    target_size: Optional[int]
+    target_size: int | None
     charset: str
     # Outline width in reference pixels; None for a filled font.
-    reference_stroke: Optional[float] = None
-    target_stroke: Optional[float] = None
+    reference_stroke: float | None = None
+    target_stroke: float | None = None
 
 
 @dataclasses.dataclass
@@ -130,7 +128,7 @@ class FontProcessor:
             height=DEFAULT_REFERENCE_CONFIG["resolution"][1],
             shape=DEFAULT_REFERENCE_CONFIG["shape"],
         )
-        self.target_configs: List[ScreenConfig] = []
+        self.target_configs: list[ScreenConfig] = []
         self.font_tasks = []
 
         self.table_filename = None
@@ -323,7 +321,7 @@ class FontProcessor:
 
         return self
 
-    def _parse_stroke(self, font_node, font_id) -> Optional[float]:
+    def _parse_stroke(self, font_node, font_id) -> float | None:
         value = font_node.get(XML_FONT_NODE_STROKE_ATTRIBUTE)
         if value is None:
             return None
@@ -359,7 +357,7 @@ class FontProcessor:
 
     def _validate_sources(self):
         missing = []
-        required_ttf_filenames = set(task.ttf_filename for task in self.font_tasks)
+        required_ttf_filenames = {task.ttf_filename for task in self.font_tasks}
         for ttf_filename in required_ttf_filenames:
             path = os.path.join(self.resources_fonts_path, ttf_filename)
             if not os.path.exists(path):
@@ -394,7 +392,7 @@ class FontProcessor:
 
         for (ttf_filename, charset, stroke), tasks in work_batches.items():
             source_ttf_path = os.path.join(self.resources_fonts_path, ttf_filename)
-            unique_sizes = sorted(list(set(task.target_size for task in tasks)))
+            unique_sizes = sorted({task.target_size for task in tasks})
             size_argument = ",".join(map(str, unique_sizes))
 
             font_tool_command = [
@@ -503,7 +501,7 @@ class FontProcessor:
             try:
                 with open(full_table_path, "w", encoding="utf-8") as f:
                     self._write_report_content(f, all_configs)
-            except IOError as e:
+            except OSError as e:
                 raise FontScalerError(
                     f"Failed to write table to {full_table_path}: {e}"
                 )
@@ -576,7 +574,7 @@ class FontProcessor:
     def _has_strokes(self) -> bool:
         return any(task.reference_stroke is not None for task in self.font_tasks)
 
-    def _humanize_names(self, task) -> Tuple[str, str]:
+    def _humanize_names(self, task) -> tuple[str, str]:
         element_text = re.sub(r"font$", "", task.font_id, flags=re.IGNORECASE)
         element_text = re.sub(r"([a-z])([A-Z])", r"\1 \2", element_text)
         element_text = element_text.strip().capitalize()
@@ -668,7 +666,7 @@ class FontProcessor:
             ET.indent(tree, space="    ", level=0)
 
     def _calculate_size(self, original_size, target_config: ScreenConfig):
-        return int(round(original_size * self._scale_factor(target_config)))
+        return round(original_size * self._scale_factor(target_config))
 
     def _scale_factor(self, target_config: ScreenConfig) -> float:
         # Improved Heuristic:
