@@ -71,8 +71,8 @@ This ensures that a line of text that fits perfectly across the width of the rou
 
 * Python 3.7+
 * The [`ttf2bmp` open-source command-line tool](https://github.com/wkusnierczyk/ttf2bmp)  
-  Hollow fonts (`stroke`) need a `ttf2bmp` with the `--stroke` option, added in
-  [ttf2bmp#21](https://github.com/wkusnierczyk/ttf2bmp/pull/21) after v0.2.1.
+  Hollow fonts (`stroke`) need [`ttf2bmp` v0.3.0](https://github.com/wkusnierczyk/ttf2bmp/releases/tag/v0.3.0) or
+  later, which added the `--stroke` option.
 
 ## Installation
 
