@@ -35,6 +35,7 @@ Instead of manually calculating font sizes, running conversion tools one by one,
 * **Zero-Config scaling** The `garmin-font-scaler` reads all information needed to perform the scaling (reference resolution, target resolutions, charsets) directly from JSON data files linked in the original `fonts.xml`.
 * **Shape Aware** Supports round, semi-round, and rectangular screens.
 * **Smart Scaling Heuristic** Uses a robust heuristic for scaling fonts between different aspect ratios (scaling based on the constraining dimension), ensuring text remains readable on 148x205 rectangles just as well as 454x454 round screens.
+* **Hollow Fonts** A `stroke` attribute on a `<font>` generates it as an outline, with the stroke width scaled per resolution by the same factor as the size. See [Hollow fonts](#hollow-fonts).
 * **Batch Optimization** The `garmin-font-scaler` groups font generation tasks by source TTF file to minimize calls to the underlying conversion tool, speeding up the build process.
 * **Documentation** The `garmin-font-scaler` generates a `fonts.md` report showing exact font sizes per resolution and a sorted list of all generated assets.
 The output is provided as a neatly formatted Markdown table, suitable for inclusion in a documentation file for your watch face.  
@@ -70,6 +71,8 @@ This ensures that a line of text that fits perfectly across the width of the rou
 
 * Python 3.7+
 * The [`ttf2bmp` open-source command-line tool](https://github.com/wkusnierczyk/ttf2bmp)  
+  Hollow fonts (`stroke`) need [`ttf2bmp` v0.3.0](https://github.com/wkusnierczyk/ttf2bmp/releases/tag/v0.3.0) or
+  later, which added the `--stroke` option.
 
 ## Installation
 
@@ -140,6 +143,31 @@ In your `fonts.xml`, add `jsonData` tags pointing to the files you just created.
     <jsonData id="FontCharsets" filename="charsets.json" />
 </resources>    
 ```
+
+#### Hollow fonts
+
+Add `stroke` to a `<font>` to generate it as an outline rather than filled. The value is the outline width in
+**reference pixels**, written as a plain decimal above `0` and at most `1000`:
+
+```xml
+<font id="TimeHollow" filename="SUSEMono-Bold-54.fnt" stroke="1.2" antialias="true" />
+```
+
+* **The stroke scales with the screen.** It is multiplied by the same factor $k$ as the size, but not rounded to
+  whole pixels: `ttf2bmp` draws fractional strokes. A scaled stroke is rounded to two decimals; at the reference
+  resolution the value is passed as written. It is never passed below `ttf2bmp`'s minimum of `0.125`, with a warning
+  when a scaled stroke would fall under it. With a 416x416 reference, `stroke="1.2"` gives `1.04` at 360x360 and
+  `1.34` at 466x466.
+* **A filled and a hollow font of the same face and size can coexist.** Hollow output is named with the stroke,
+  the decimal point written as `p` (`SUSEMono-Bold-47-stroke1p04.fnt`), and each generated `fonts.xml` points
+  every font id at its own file.
+* **`stroke` is not copied into the generated `fonts.xml` files.** It is the scaler's configuration, not a
+  Connect IQ attribute.
+* **The source `fonts.xml` must stay off the Connect IQ resource path** when it has a `stroke`. There, the hollow
+  id still names the filled reference file, and `stroke` is not an attribute Connect IQ knows.
+* **The report** marks hollow fonts. The by-element table gives the reference stroke next to the font
+  (`SUSEMono bold, hollow 1.2`), and the by-resolution table adds a `Stroke` column with the scaled width.
+  Without any `stroke`, the report and all generated files are exactly as before.
 
 #### Execute
 

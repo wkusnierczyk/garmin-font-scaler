@@ -40,6 +40,7 @@ JSON_CHARSET_KEY = "fontCharset"
 XML_FONT_NODE_PATTERN = ".//font"
 XML_FONT_NODE_ID_ATTRIBUTE = "id"
 XML_FONT_NODE_FILENAME_ATTRIBUTE = "filename"
+XML_FONT_NODE_STROKE_ATTRIBUTE = "stroke"
 
 XML_JSON_NODE_PATTERN = ".//jsonData"
 XML_JSON_NODE_ID_ATTRIBUTE = "id"
@@ -52,6 +53,17 @@ FONT_TOOL_HINTING_OPTION = "-hinting"
 FONT_TOOL_SIZE_OPTION = "-s"
 FONT_TOOL_OUTPUT_OPTION = "-o"
 FONT_TOOL_PADDING_OPTION = "-p"
+FONT_TOOL_STROKE_OPTION = "-stroke"
+
+# ttf2bmp's narrowest outline: one supersample of its 8x render. A scaled stroke is
+# rounded to STROKE_DECIMALS and never passed narrower than this.
+MIN_STROKE = 0.125
+STROKE_DECIMALS = 2
+# A sanity bound, far wider than any glyph stem. It also keeps every value in the
+# range where Python's repr and Go's formatting both write plain decimals.
+MAX_STROKE = 1000
+# A plain decimal: float() alone would also take "1_0", "1e3" and surrounding spaces.
+STROKE_PATTERN = r"\d+(\.\d*)?|\.\d+"
 
 FNT_FILENAME_PARSE_REGEX = r"^(.*)-(\d+)\.fnt$"
 
@@ -78,6 +90,9 @@ class FontTask:
     reference_size: int
     target_size: int | None
     charset: str
+    # Outline width in reference pixels; None for a filled font.
+    reference_stroke: float | None = None
+    target_stroke: float | None = None
 
 
 @dataclasses.dataclass
@@ -284,6 +299,7 @@ class FontProcessor:
                 font_size = int(match.group(2))
 
                 charset = charsets_map.get(font_id, active_default_charset)
+                reference_stroke = self._parse_stroke(font_node, font_id)
 
                 task = FontTask(
                     xml_node=font_node,
@@ -294,6 +310,7 @@ class FontProcessor:
                     reference_size=font_size,
                     target_size=None,
                     charset=charset,
+                    reference_stroke=reference_stroke,
                 )
                 self.font_tasks.append(task)
 
@@ -303,6 +320,18 @@ class FontProcessor:
             raise FontScalerError(f"Parsing JSON data in XML failed with error: {e}")
 
         return self
+
+    def _parse_stroke(self, font_node, font_id) -> float | None:
+        value = font_node.get(XML_FONT_NODE_STROKE_ATTRIBUTE)
+        if value is None:
+            return None
+        stroke = float(value) if re.fullmatch(STROKE_PATTERN, value) else 0
+        if not (0 < stroke <= MAX_STROKE):
+            raise FontScalerError(
+                f"Font '{font_id}': stroke must be a number of pixels above 0 and "
+                f"at most {MAX_STROKE}, not '{value}'"
+            )
+        return stroke
 
     def _find_json_node(self, root, json_id):
         for node in root.findall(XML_JSON_NODE_PATTERN):
@@ -350,13 +379,18 @@ class FontProcessor:
             for node in target_root.findall(XML_FONT_NODE_PATTERN)
         }
 
+        # One ttf2bmp call per face, charset and stroke: the stroke applies to every size
+        # in a call, so a filled and a hollow font of one face are never batched together.
         work_batches = defaultdict(list)
         for task in self.font_tasks:
             target_size = self._calculate_size(task.reference_size, target_config)
-            task = dataclasses.replace(task, target_size=target_size)
-            work_batches[(task.ttf_filename, task.charset)].append(task)
+            target_stroke = self._calculate_stroke(task, target_config)
+            task = dataclasses.replace(
+                task, target_size=target_size, target_stroke=target_stroke
+            )
+            work_batches[(task.ttf_filename, task.charset, target_stroke)].append(task)
 
-        for (ttf_filename, charset), tasks in work_batches.items():
+        for (ttf_filename, charset, stroke), tasks in work_batches.items():
             source_ttf_path = os.path.join(self.resources_fonts_path, ttf_filename)
             unique_sizes = sorted({task.target_size for task in tasks})
             size_argument = ",".join(map(str, unique_sizes))
@@ -380,6 +414,11 @@ class FontProcessor:
                     [FONT_TOOL_PADDING_OPTION, str(self.font_tool_padding)]
                 )
 
+            if stroke is not None:
+                font_tool_command.extend(
+                    [FONT_TOOL_STROKE_OPTION, self._format_stroke(stroke)]
+                )
+
             try:
                 subprocess.run(
                     font_tool_command,
@@ -388,7 +427,7 @@ class FontProcessor:
                     stderr=subprocess.DEVNULL,
                 )
                 for task in tasks:
-                    new_filename = f"{task.font_name}-{task.target_size}.fnt"
+                    new_filename = self._target_fnt_filename(task)
                     if task.font_id in target_node_map:
                         node = target_node_map[task.font_id]
                         node.set(XML_FONT_NODE_FILENAME_ATTRIBUTE, new_filename)
@@ -404,6 +443,46 @@ class FontProcessor:
 
         self._pretty_print_xml(target_tree)
         target_tree.write(target_xml, encoding=XML_ENCODING, xml_declaration=True)
+
+    def _calculate_stroke(
+        self, task: FontTask, target_config: ScreenConfig, warn: bool = True
+    ):
+        """The stroke for one resolution: scaled by the same factor as the size, but not
+        rounded to whole pixels, since ttf2bmp draws fractional strokes. Scaled values
+        are rounded to STROKE_DECIMALS; at the reference resolution the configured
+        value is passed as written."""
+        if task.reference_stroke is None:
+            return None
+        factor = self._scale_factor(target_config)
+        stroke = task.reference_stroke * factor
+        if stroke < MIN_STROKE:
+            if warn:
+                self._warn(
+                    f"Font '{task.font_id}' at {target_config.key}: stroke "
+                    f"{round(stroke, 3)} is below ttf2bmp's minimum, using {MIN_STROKE}"
+                )
+            return MIN_STROKE
+        if factor == 1:
+            return task.reference_stroke
+        # Rounding cannot take a value at or above the minimum below it by more than
+        # the rounding step; keep the minimum rather than warn about the rounding.
+        return max(MIN_STROKE, round(stroke, STROKE_DECIMALS))
+
+    @staticmethod
+    def _format_stroke(stroke: float) -> str:
+        """The shortest decimal that reads back as the same number: 1.0 is '1', 1.2 is
+        '1.2'. The same as ttf2bmp's own formatting, which names the output after it."""
+        text = repr(float(stroke))
+        return text[:-2] if text.endswith(".0") else text
+
+    def _target_fnt_filename(self, task: FontTask) -> str:
+        """The .fnt ttf2bmp writes for a task. A hollow font carries the stroke in its
+        name, with the decimal point written as 'p': Face-54-stroke1p2.fnt."""
+        name = f"{task.font_name}-{task.target_size}"
+        if task.target_stroke is not None:
+            stroke = self._format_stroke(task.target_stroke)
+            name += "-stroke" + stroke.replace(".", "p")
+        return name + ".fnt"
 
     def _generate_markdown_report(self):
         seen_keys = {self.reference_config.key}
@@ -441,6 +520,9 @@ class FontProcessor:
         rows = []
         for task in self.font_tasks:
             element_text, font_text = self._humanize_names(task)
+            if task.reference_stroke is not None:
+                # This table lists reference sizes, so it gives the reference stroke.
+                font_text += " " + self._format_stroke(task.reference_stroke)
             row_data = [element_text, font_text]
             for config in configs:
                 if config.key == self.reference_config.key:
@@ -453,7 +535,12 @@ class FontProcessor:
         self._write_formatted_table(file, headers, rows, alignments)
 
     def _write_resolution_list_table(self, file, configs):
+        # The stroke column appears only when a font has a stroke, so the tables of a
+        # configuration without one are exactly what they were before strokes existed.
+        with_stroke = self._has_strokes()
         headers = ["Resolution", "Shape", "Element", "Font", "Size"]
+        if with_stroke:
+            headers.append("Stroke")
         rows = []
         for config in configs:
             for task in self.font_tasks:
@@ -462,23 +549,30 @@ class FontProcessor:
                     size = task.reference_size
                 else:
                     size = self._calculate_size(task.reference_size, config)
+                data = [
+                    f"{config.width} x {config.height}",
+                    config.shape,
+                    element_text,
+                    font_text,
+                    str(size),
+                ]
+                if with_stroke:
+                    stroke = self._calculate_stroke(task, config, warn=False)
+                    data.append("" if stroke is None else self._format_stroke(stroke))
                 rows.append(
                     {
                         "sort_res": config.width * config.height,
                         "sort_elem": element_text,
-                        "data": [
-                            f"{config.width} x {config.height}",
-                            config.shape,
-                            element_text,
-                            font_text,
-                            str(size),
-                        ],
+                        "data": data,
                     }
                 )
         rows.sort(key=lambda x: (x["sort_res"], x["sort_elem"]))
         clean_rows = [r["data"] for r in rows]
-        alignments = [False, True, True, True, False]
+        alignments = [False, True, True, True, False] + ([False] if with_stroke else [])
         self._write_formatted_table(file, headers, clean_rows, alignments)
+
+    def _has_strokes(self) -> bool:
+        return any(task.reference_stroke is not None for task in self.font_tasks)
 
     def _humanize_names(self, task) -> tuple[str, str]:
         element_text = re.sub(r"font$", "", task.font_id, flags=re.IGNORECASE)
@@ -492,6 +586,8 @@ class FontProcessor:
             font_text = " ".join([base] + suffixes)
         else:
             font_text = task.font_name
+        if task.reference_stroke is not None:
+            font_text += ", hollow"
         return element_text, font_text
 
     def _write_formatted_table(self, file, headers, rows, is_left_align):
@@ -555,6 +651,10 @@ class FontProcessor:
             root = tree.getroot()
             for json_node in root.findall(XML_JSON_NODE_PATTERN):
                 root.remove(json_node)
+            # The stroke is the scaler's configuration, not a Connect IQ attribute, and it
+            # is already applied to the bitmaps the target points at.
+            for font_node in root.findall(XML_FONT_NODE_PATTERN):
+                font_node.attrib.pop(XML_FONT_NODE_STROKE_ATTRIBUTE, None)
             self._pretty_print_xml(tree)
             tree.write(target_xml_path, encoding=XML_ENCODING, xml_declaration=True)
         except ET.ParseError:
@@ -566,6 +666,9 @@ class FontProcessor:
             ET.indent(tree, space="    ", level=0)
 
     def _calculate_size(self, original_size, target_config: ScreenConfig):
+        return round(original_size * self._scale_factor(target_config))
+
+    def _scale_factor(self, target_config: ScreenConfig) -> float:
         # Improved Heuristic:
         # Calculate scaling factors for both dimensions and pick the minimum.
         # This ensures the font fits within the constraints of BOTH width and height,
@@ -574,9 +677,7 @@ class FontProcessor:
         width_ratio = target_config.width / self.reference_config.width
         height_ratio = target_config.height / self.reference_config.height
 
-        scale_factor = min(width_ratio, height_ratio)
-
-        return round(original_size * scale_factor)
+        return min(width_ratio, height_ratio)
 
     def _info(self, message):
         print(message, file=sys.stderr)
