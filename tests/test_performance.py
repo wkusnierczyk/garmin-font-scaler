@@ -1,5 +1,6 @@
 import time
 from unittest.mock import patch
+
 from garmin_font_scaler.core import FontProcessor, FontTask, ScreenConfig
 
 

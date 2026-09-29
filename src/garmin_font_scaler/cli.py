@@ -1,10 +1,10 @@
 import argparse
 import sys
-from .core import FontProcessor, FontScalerError, DEFAULT_PROJECT_DIR
 
+from .core import DEFAULT_PROJECT_DIR, FontProcessor, FontScalerError
 
 try:
-    from importlib.metadata import version, PackageNotFoundError
+    from importlib.metadata import PackageNotFoundError, version
 except ImportError:
     pass
 
@@ -106,7 +106,7 @@ def main():
     except FontScalerError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- the CLI's last resort: report, exit 1
         print(f"Unexpected Error: {e}", file=sys.stderr)
         sys.exit(1)
 

@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from garmin_font_scaler.core import FontProcessor
 
 # Updated Sample XML with new JSON format
